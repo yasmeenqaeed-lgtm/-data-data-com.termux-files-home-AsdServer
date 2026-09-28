@@ -1,0 +1,2097 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#080d09">
+  <meta name="description" content="Encrypted Military Messaging System - نظام مراسلة آمن">
+  <title>Encrypted Military Messaging System</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+  <!-- Leaflet: خريطة تفاعلية لمواقع المستخدمين -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIINfQ3E4G7fR9uF4eQxY7J7Y7J7Y7J7Y7J7="
+    crossorigin=""
+  >
+
+  <style>
+    #adminUsersMap {
+      width:100%;
+      height:360px;
+      min-height:280px;
+      border-radius:10px;
+      overflow:hidden;
+      background:#172033;
+    }
+
+    #adminUsersMap .leaflet-popup-content-wrapper,
+    #adminUsersMap .leaflet-popup-tip {
+      background:#0f1710;
+      color:#fff;
+    }
+
+    #adminUsersMap .leaflet-popup-content {
+      font-family:'Cairo',sans-serif;
+      direction:rtl;
+      text-align:right;
+      line-height:1.8;
+    }
+  </style>
+
+  <style>
+    :root {
+      --bg-primary:#080d09; --bg-secondary:#0f1710;
+      --accent-green:#00ff80; --accent-red:#ff334b; --accent-blue:#00bfff;
+      --text-main:#e2e8f0; --border-color:rgba(255,255,255,.1);
+      --warning:#ffb000;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;font-family:'Cairo',sans-serif}
+    body{background:var(--bg-primary);color:var(--text-main);overflow-x:hidden;height:100vh}
+    .hidden{display:none!important}
+    button{font-family:inherit}
+    .auth-page{position:fixed;inset:0;background:var(--bg-primary);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px;overflow-y:auto}
+    .auth-card{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:16px;width:100%;max-width:480px;padding:30px 24px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+    .app-page{position:fixed;inset:0;display:flex;flex-direction:column;z-index:1;pointer-events:auto}
+    .topbar{height:60px;background:var(--bg-secondary);border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;padding:0 16px}
+    .layout{display:flex;flex:1;overflow:hidden}
+    .sidebar{width:320px;background:var(--bg-secondary);border-left:1px solid var(--border-color);display:flex;flex-direction:column;overflow:hidden}
+    .chat{flex:1;display:flex;flex-direction:column;background:var(--bg-primary);position:relative}
+    .messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+    .composer{padding:12px;background:var(--bg-secondary);border-top:1px solid var(--border-color);display:flex;align-items:flex-end;gap:8px}
+    .composer textarea{min-height:120px;max-height:360px;overflow-y:auto;line-height:1.9;font-size:22px;width:100%;box-sizing:border-box;padding:12px 14px}
+    .input-group{margin-bottom:14px}
+    .input-group label{display:block;font-size:13px;color:#aaa;margin-bottom:6px;text-align:right}
+    .input-wrapper{position:relative;display:flex;align-items:center}
+    .input-wrapper input{width:100%;padding:12px 14px;background:rgba(255,255,255,.03);border:1px solid var(--border-color);color:#fff;border-radius:8px;font-size:14px;outline:none}
+    .input-wrapper input:focus{border-color:var(--accent-green)}
+    .login-button{width:100%;padding:13px;background:var(--accent-green);border:none;border-radius:8px;font-weight:bold;cursor:pointer;color:#000;font-size:15px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:8px}
+    .login-button:hover{opacity:.9}
+    .gate{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.8);pointer-events:auto}
+    .gate .card{background:var(--bg-secondary);border:1px solid var(--border-color);padding:25px;border-radius:12px;max-width:400px;text-align:center}
+    .primary-btn,.danger-btn,.blue-btn,.warning-btn,.secondary{width:100%;padding:10px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:8px}
+    .primary-btn{background:var(--accent-green);border:none;color:#000}
+    .danger-btn{background:var(--accent-red);border:none;color:#fff}
+    .blue-btn{background:var(--accent-blue);border:none;color:#001018}
+    .warning-btn{background:var(--warning);border:none;color:#000}
+    .secondary{background:transparent;border:1px solid var(--border-color);color:#fff}
+    .modal{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center}
+    .modal-overlay{position:absolute;inset:0;background:rgba(0,0,0,.7)}
+    .modal-card{position:relative;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;width:92%;max-width:760px;max-height:88vh;display:flex;flex-direction:column;z-index:2;padding:20px}
+    .lock-screen{position:fixed;inset:0;z-index:999999;background:#080d09;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px}
+    .error{color:var(--accent-red);font-size:13px;margin-top:10px;text-align:right}
+    .notice{padding:9px 12px;border-radius:7px;margin:8px 0;font-size:12px;border:1px solid transparent}
+    .notice.blue{color:#8fe8ff;background:rgba(0,191,255,.08);border-color:rgba(0,191,255,.25)}
+    .notice.red{color:#ff9eaa;background:rgba(255,51,75,.08);border-color:rgba(255,51,75,.25)}
+    .notice.green{color:#8affbe;background:rgba(0,255,128,.08);border-color:rgba(0,255,128,.25)}
+    .notice.orange{color:#ffd27a;background:rgba(255,176,0,.08);border-color:rgba(255,176,0,.25)}
+    .admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:10px}
+    .admin-grid button{font-size:11px;padding:8px;margin:0}
+    .admin-section{border-top:1px solid var(--border-color);margin-top:12px;padding-top:12px}
+    .admin-title{color:var(--accent-green);font-size:13px;margin-bottom:8px}
+    .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}
+    .stat{background:rgba(255,255,255,.03);border:1px solid var(--border-color);border-radius:8px;padding:8px;text-align:center}
+    .stat b{display:block;font-size:17px;color:var(--accent-blue)}
+    .stat span{font-size:10px;color:#aaa}
+    .connection-strip{position:fixed;left:12px;bottom:12px;z-index:5000;max-width:calc(100% - 24px);pointer-events:none}
+    .audio-preview{width:100%;margin-top:8px}
+    .file-name{font-size:11px;color:#aaa;margin-top:5px}
+    .row{display:flex;gap:8px;align-items:center}
+    .row>*{flex:1}
+    .system-item{padding:10px;border-bottom:1px solid var(--border-color);font-size:12px}
+    .system-item strong{color:var(--accent-red)}
+    .map-frame{width:100%;height:420px;border:1px solid var(--border-color);border-radius:8px;background:#07111a}
+    @media(max-width:760px){
+      .sidebar{position:fixed;right:-330px;top:60px;bottom:0;z-index:4000;transition:right .2s}
+      .sidebar.mobile-open,.sidebar.open{right:0}
+      .topbar{padding:0 10px}
+      .topbar strong{font-size:12px}
+      .composer{padding:8px}
+      .admin-grid{grid-template-columns:1fr 1fr}
+      .modal-card{width:96%;padding:14px}
+    }
+  </style>
+
+  <!-- UI POLISH V1 -->
+  <style>
+    /* =========================================================
+       Encrypted Military Messaging System
+       واجهة محسّنة - CSS فقط
+       لا يغيّر أي وظيفة JavaScript أو API أو قاعدة بيانات
+       ========================================================= */
+
+    :root {
+      --ui-radius: 12px;
+      --ui-radius-lg: 16px;
+      --ui-shadow: 0 10px 30px rgba(0,0,0,.28);
+      --ui-shadow-soft: 0 4px 16px rgba(0,0,0,.20);
+      --ui-glass: rgba(15,23,16,.92);
+      --ui-hover: rgba(0,255,128,.055);
+      --ui-focus: rgba(0,255,128,.18);
+    }
+
+    html {
+      background: var(--bg-primary);
+      scroll-behavior: smooth;
+    }
+
+    body {
+      min-width: 0;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    button,
+    input,
+    textarea,
+    select {
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    button {
+      min-height: 40px;
+      transition:
+        transform .16s ease,
+        box-shadow .16s ease,
+        opacity .16s ease,
+        border-color .16s ease,
+        background-color .16s ease;
+    }
+
+    button:not(:disabled):active {
+      transform: translateY(1px) scale(.985);
+    }
+
+    button:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible,
+    select:focus-visible {
+      outline: 2px solid var(--accent-green);
+      outline-offset: 2px;
+    }
+
+    /* ---------- صفحات الدخول ---------- */
+
+    .auth-page {
+      padding: 18px;
+      background:
+        radial-gradient(circle at 50% 0,
+          rgba(0,255,128,.055),
+          transparent 38%),
+        var(--bg-primary);
+    }
+
+    .auth-card {
+      padding: 28px 24px;
+      border-radius: var(--ui-radius-lg);
+      box-shadow:
+        0 20px 55px rgba(0,0,0,.42),
+        0 0 0 1px rgba(0,255,128,.025);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+
+    .input-group {
+      margin-bottom: 16px;
+    }
+
+    .input-group label {
+      font-weight: 600;
+      letter-spacing: .1px;
+    }
+
+    .input-wrapper input,
+    .input-wrapper select,
+    input,
+    textarea,
+    select {
+      transition:
+        border-color .18s ease,
+        background-color .18s ease,
+        box-shadow .18s ease;
+    }
+
+    .input-wrapper input:hover,
+    input:hover,
+    textarea:hover,
+    select:hover {
+      border-color: rgba(255,255,255,.18);
+    }
+
+    .input-wrapper input:focus,
+    input:focus,
+    textarea:focus,
+    select:focus {
+      border-color: var(--accent-green);
+      background: rgba(0,255,128,.025);
+      box-shadow: 0 0 0 3px var(--ui-focus);
+    }
+
+    .login-button {
+      min-height: 46px;
+      border-radius: 10px;
+      box-shadow: 0 6px 18px rgba(0,255,128,.12);
+    }
+
+    .login-button:hover {
+      opacity: 1;
+      box-shadow: 0 8px 24px rgba(0,255,128,.20);
+    }
+
+    /* ---------- التطبيق ---------- */
+
+    .app-page {
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .topbar {
+      min-height: 60px;
+      height: 60px;
+      gap: 10px;
+      position: relative;
+      z-index: 4100;
+      box-shadow: 0 2px 14px rgba(0,0,0,.18);
+    }
+
+    .topbar > * {
+      min-width: 0;
+    }
+
+    .layout {
+      min-width: 0;
+      min-height: 0;
+      position: relative;
+    }
+
+    .sidebar {
+      flex: 0 0 320px;
+      min-width: 0;
+      box-shadow: inset -1px 0 rgba(255,255,255,.015);
+      scrollbar-width: thin;
+    }
+
+    .sidebar > * {
+      min-width: 0;
+    }
+
+    .chat {
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    /* ---------- القوائم ---------- */
+
+    #usersList {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(0,255,128,.20) transparent;
+    }
+
+    #usersList > * {
+      min-width: 0;
+    }
+
+    .system-item {
+      transition:
+        background-color .16s ease,
+        border-color .16s ease;
+    }
+
+    .system-item:hover {
+      background: var(--ui-hover);
+    }
+
+    /* ---------- الرسائل ---------- */
+
+    .messages {
+      min-width: 0;
+      min-height: 0;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(0,255,128,.20) transparent;
+      scroll-behavior: smooth;
+    }
+
+    .messages::-webkit-scrollbar,
+    #usersList::-webkit-scrollbar,
+    .modal-card::-webkit-scrollbar {
+      width: 7px;
+      height: 7px;
+    }
+
+    .messages::-webkit-scrollbar-track,
+    #usersList::-webkit-scrollbar-track,
+    .modal-card::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .messages::-webkit-scrollbar-thumb,
+    #usersList::-webkit-scrollbar-thumb,
+    .modal-card::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,.13);
+      border-radius: 20px;
+    }
+
+    .messages::-webkit-scrollbar-thumb:hover,
+    #usersList::-webkit-scrollbar-thumb:hover,
+    .modal-card::-webkit-scrollbar-thumb:hover {
+      background: rgba(0,255,128,.25);
+    }
+
+    /* ---------- منطقة الكتابة ---------- */
+
+    .composer {
+      position: relative;
+      z-index: 20;
+      min-width: 0;
+      box-shadow: 0 -5px 20px rgba(0,0,0,.14);
+    }
+
+    .composer > * {
+      min-width: 0;
+    }
+
+    .composer textarea {
+      min-width: 0;
+      min-height: 92px;
+      max-height: 300px;
+      resize: vertical;
+      border-radius: 12px;
+      background: rgba(255,255,255,.035);
+    }
+
+    .composer button {
+      flex: 0 0 auto;
+    }
+
+    /* ---------- الأزرار ---------- */
+
+    .primary-btn,
+    .danger-btn,
+    .blue-btn,
+    .warning-btn,
+    .secondary {
+      min-height: 42px;
+      border-radius: 9px;
+      padding: 9px 12px;
+      line-height: 1.4;
+      box-shadow: var(--ui-shadow-soft);
+    }
+
+    .primary-btn:hover {
+      box-shadow: 0 7px 20px rgba(0,255,128,.16);
+    }
+
+    .danger-btn:hover {
+      box-shadow: 0 7px 20px rgba(255,51,75,.14);
+    }
+
+    .blue-btn:hover {
+      box-shadow: 0 7px 20px rgba(0,191,255,.14);
+    }
+
+    .warning-btn:hover {
+      box-shadow: 0 7px 20px rgba(255,176,0,.12);
+    }
+
+    .secondary:hover {
+      border-color: rgba(0,255,128,.32);
+      background: rgba(0,255,128,.045);
+    }
+
+    .admin-grid {
+      gap: 9px;
+    }
+
+    .admin-grid button {
+      min-height: 42px;
+      line-height: 1.45;
+      border-radius: 9px;
+      overflow: hidden;
+    }
+
+    /* ---------- لوحة تحكم مسؤول النظام ---------- */
+
+    .admin-section {
+      margin-top: 15px;
+      padding-top: 15px;
+    }
+
+    .admin-title {
+      font-weight: 700;
+      letter-spacing: .1px;
+    }
+
+    .stats {
+      gap: 9px;
+    }
+
+    .stat {
+      min-width: 0;
+      min-height: 66px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.01);
+    }
+
+    .stat b,
+    .stat span {
+      overflow-wrap: anywhere;
+    }
+
+    /* ---------- الإشعارات ---------- */
+
+    .notice {
+      line-height: 1.8;
+      overflow-wrap: anywhere;
+    }
+
+    /* ---------- النوافذ المنبثقة ---------- */
+
+    .modal {
+      padding: 12px;
+    }
+
+    .modal-overlay {
+      backdrop-filter: blur(2px);
+      -webkit-backdrop-filter: blur(2px);
+    }
+
+    .modal-card {
+      width: min(94vw, 820px);
+      max-height: min(90vh, 900px);
+      min-width: 0;
+      overflow: auto;
+      border-radius: var(--ui-radius-lg);
+      box-shadow:
+        0 25px 70px rgba(0,0,0,.48),
+        0 0 0 1px rgba(0,255,128,.025);
+      scrollbar-width: thin;
+    }
+
+    .modal-card > * {
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    /* ---------- الجداول والتقارير ---------- */
+
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      min-width: 620px;
+    }
+
+    th,
+    td {
+      padding: 10px 9px;
+      border-bottom: 1px solid var(--border-color);
+      vertical-align: middle;
+      line-height: 1.7;
+      overflow-wrap: anywhere;
+    }
+
+    th {
+      color: var(--accent-green);
+      background: rgba(0,255,128,.035);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    tbody tr {
+      transition: background-color .15s ease;
+    }
+
+    tbody tr:hover {
+      background: rgba(255,255,255,.025);
+    }
+
+    /* أي حاوية جدول طويلة تصبح قابلة للتمرير بدلاً من كسر الصفحة */
+    [style*="overflow-x:auto"],
+    [style*="overflow: auto"],
+    .table-wrap,
+    .report-table-wrap {
+      max-width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+    }
+
+    /* ---------- الخريطة ---------- */
+
+    #adminUsersMap,
+    .map-frame {
+      max-width: 100%;
+      box-shadow: var(--ui-shadow-soft);
+    }
+
+    #adminUsersMap {
+      height: clamp(280px, 48vh, 460px);
+      border-radius: 12px;
+    }
+
+    /* ---------- شاشة القفل / بوابة الصلاحية ---------- */
+
+    .gate .card {
+      width: min(92vw, 430px);
+      border-radius: var(--ui-radius-lg);
+      box-shadow: 0 20px 60px rgba(0,0,0,.45);
+    }
+
+    .lock-screen {
+      padding: 24px;
+    }
+
+    /* ---------- شريط حالة الاتصال ---------- */
+
+    .connection-strip {
+      max-width: min(92vw, 420px);
+      left: auto;
+      right: 12px;
+      bottom: 12px;
+    }
+
+    #connectionNotice,
+    #networkStatusBar {
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    /* ---------- الصور والمرفقات ---------- */
+
+    img,
+    video,
+    audio,
+    canvas {
+      max-width: 100%;
+    }
+
+    .audio-preview {
+      border-radius: 9px;
+    }
+
+    .file-name {
+      overflow-wrap: anywhere;
+      line-height: 1.6;
+    }
+
+    /* ---------- صفوف النماذج ---------- */
+
+    .row {
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+
+    .row > * {
+      min-width: 0;
+    }
+
+    /* ---------- الهاتف ---------- */
+
+    @media (max-width: 760px) {
+      body {
+        overflow: hidden;
+      }
+
+      .auth-page {
+        align-items: flex-start;
+        padding: 14px;
+      }
+
+      .auth-card {
+        margin: auto 0;
+        padding: 22px 16px;
+      }
+
+      .topbar {
+        height: 58px;
+        min-height: 58px;
+        padding: 0 9px;
+        gap: 6px;
+      }
+
+      .layout {
+        height: calc(100vh - 58px);
+      }
+
+      .sidebar {
+        width: min(88vw, 330px);
+        flex-basis: min(88vw, 330px);
+        right: calc(-1 * min(88vw, 330px));
+        top: 58px;
+        box-shadow: -12px 0 30px rgba(0,0,0,.32);
+      }
+
+      .sidebar.mobile-open,
+      .sidebar.open {
+        right: 0;
+      }
+
+      .messages {
+        padding: 10px;
+        gap: 9px;
+      }
+
+      .composer {
+        padding: 7px;
+        gap: 6px;
+      }
+
+      .composer textarea {
+        min-height: 82px;
+        max-height: 220px;
+        font-size: 18px;
+        padding: 10px 11px;
+      }
+
+      .admin-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 7px;
+      }
+
+      .admin-grid button {
+        min-height: 40px;
+        padding: 7px 6px;
+        font-size: 11px;
+      }
+
+      .modal {
+        padding: 7px;
+        align-items: center;
+      }
+
+      .modal-card {
+        width: 98vw;
+        max-height: 92vh;
+        padding: 13px;
+        border-radius: 13px;
+      }
+
+      .map-frame {
+        height: 330px;
+      }
+
+      #adminUsersMap {
+        height: 330px;
+      }
+
+      .connection-strip {
+        right: 8px;
+        bottom: 8px;
+        max-width: calc(100vw - 16px);
+      }
+    }
+
+    /* ---------- الهواتف الصغيرة جدًا ---------- */
+
+    @media (max-width: 420px) {
+      .auth-page {
+        padding: 9px;
+      }
+
+      .auth-card {
+        padding: 18px 13px;
+      }
+
+      .topbar {
+        padding: 0 6px;
+      }
+
+      .messages {
+        padding: 7px;
+      }
+
+      .composer textarea {
+        font-size: 17px;
+      }
+
+      .admin-grid {
+        gap: 6px;
+      }
+
+      .admin-grid button {
+        font-size: 10px;
+      }
+
+      .stat {
+        min-height: 60px;
+        padding: 7px 5px;
+      }
+
+      .stat b {
+        font-size: 15px;
+      }
+    }
+
+    /* ---------- منع كسر النصوص الطويلة ---------- */
+
+    h1, h2, h3, h4, h5, h6,
+    p, span, label, strong, div {
+      overflow-wrap: anywhere;
+    }
+
+    /* ---------- حركة خفيفة بدون إزعاج ---------- */
+
+    @media (prefers-reduced-motion: no-preference) {
+      .auth-card,
+      .modal-card,
+      .gate .card {
+        animation: uiFadeIn .22s ease-out;
+      }
+
+      @keyframes uiFadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(5px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    }
+
+    /* ---------- تحسين الوضع اللمسي ---------- */
+
+    @media (pointer: coarse) {
+      button,
+      .login-button,
+      .primary-btn,
+      .danger-btn,
+      .blue-btn,
+      .warning-btn,
+      .secondary {
+        min-height: 44px;
+      }
+
+      input,
+      select,
+      textarea {
+        font-size: 16px;
+      }
+    }
+  
+
+/* =========================================================
+   SECURE MESSENGER — WHATSAPP VISUAL THEME
+   UI ONLY — لا يغيّر JavaScript أو API
+========================================================= */
+
+:root{
+  --bg-primary:#efeae2;
+  --bg-secondary:#f0f2f5;
+  --bg-card:#ffffff;
+  --text-main:#111b21;
+  --text-muted:#667781;
+  --accent-green:#00a884;
+  --accent-green-dark:#075e54;
+  --accent-light:#d9fdd3;
+  --border-color:#d1d7db;
+  --ui-hover:#f5f6f6;
+}
+
+/* الصفحة */
+body{
+  background:#efeae2 !important;
+  color:#111b21 !important;
+}
+
+/* الشريط العلوي */
+.topbar{
+  background:#075e54 !important;
+  color:#ffffff !important;
+  border-bottom:0 !important;
+}
+
+.topbar *{
+  color:#ffffff !important;
+}
+
+#identity{
+  color:#d9fdd3 !important;
+}
+
+#logoutBtn{
+  color:#ffffff !important;
+  background:rgba(255,255,255,.12) !important;
+  border-color:rgba(255,255,255,.15) !important;
+}
+
+/* التخطيط */
+.layout{
+  background:#efeae2 !important;
+}
+
+.sidebar{
+  background:#ffffff !important;
+  color:#111b21 !important;
+  border-left:1px solid #d1d7db !important;
+}
+
+.sidebar h3,
+.sidebar h4{
+  color:#111b21 !important;
+}
+
+/* قائمة المستخدمين */
+#usersList,
+#groupsList{
+  background:#ffffff !important;
+}
+
+.system-item,
+.user-item{
+  background:#ffffff !important;
+  color:#111b21 !important;
+  border-bottom:1px solid #edf0f2 !important;
+}
+
+.system-item:hover,
+.user-item:hover{
+  background:#f5f6f6 !important;
+}
+
+/* منطقة المحادثة */
+.chat{
+  background:#efeae2 !important;
+}
+
+#chatTitle{
+  color:#111b21 !important;
+}
+
+#chatStatus{
+  color:#667781 !important;
+}
+
+/* الرسائل */
+.messages,
+#messages{
+  background:#efeae2 !important;
+}
+
+.msg{
+  background:#ffffff !important;
+  color:#111b21 !important;
+  border:0 !important;
+  border-radius:8px 8px 8px 2px !important;
+  box-shadow:0 1px 1px rgba(0,0,0,.13) !important;
+}
+
+.msg.mine{
+  background:#d9fdd3 !important;
+  color:#111b21 !important;
+  border-radius:8px 8px 2px 8px !important;
+}
+
+.message-bubble{
+  background:#ffffff !important;
+  color:#111b21 !important;
+  border:0 !important;
+}
+
+.message-bubble.mine,
+.message-bubble.sent{
+  background:#d9fdd3 !important;
+}
+
+/* شريط اختيار المستلم */
+#recipientBar{
+  background:#f0f2f5 !important;
+  color:#111b21 !important;
+  border-color:#d1d7db !important;
+}
+
+#recipientName{
+  color:#111b21 !important;
+}
+
+/* زر اختيار المستلم */
+#chooseRecipientBtn{
+  background:#00a884 !important;
+  color:#ffffff !important;
+  border:0 !important;
+}
+
+/* منطقة الكتابة */
+.composer{
+  background:#f0f2f5 !important;
+  border-top:1px solid #d1d7db !important;
+}
+
+#messageInput{
+  background:#ffffff !important;
+  color:#111b21 !important;
+  border:1px solid #ffffff !important;
+  border-radius:22px !important;
+  box-shadow:none !important;
+}
+
+#messageInput::placeholder{
+  color:#667781 !important;
+}
+
+#messageInput:focus{
+  background:#ffffff !important;
+  border-color:#00a884 !important;
+  box-shadow:0 0 0 1px rgba(0,168,132,.2) !important;
+}
+
+/* أزرار الكتابة */
+#attachBtn,
+#voiceBtn{
+  color:#54656f !important;
+}
+
+#attachBtn:hover,
+#voiceBtn:hover{
+  color:#00a884 !important;
+}
+
+#sendMessageBtn{
+  background:#00a884 !important;
+  color:#ffffff !important;
+  border:0 !important;
+}
+
+/* لوحة تحكم مسؤول النظام */
+#adminPanel{
+  background:#ffffff !important;
+  color:#111b21 !important;
+  border-color:#d1d7db !important;
+}
+
+#adminPanel .admin-title,
+#adminPanel h3,
+#adminPanel h4{
+  color:#075e54 !important;
+}
+
+#adminPanel label,
+#adminPanel span,
+#adminPanel p{
+  color:#111b21 !important;
+}
+
+#adminPanel input,
+#adminPanel textarea,
+#adminPanel select{
+  background:#ffffff !important;
+  color:#111b21 !important;
+  border-color:#d1d7db !important;
+}
+
+/* إحصائيات المشرف */
+.stat{
+  background:#f0f2f5 !important;
+  color:#111b21 !important;
+  border-color:#d1d7db !important;
+}
+
+.stat b{
+  color:#00a884 !important;
+}
+
+.stat span{
+  color:#667781 !important;
+}
+
+/* أزرار المشرف */
+.primary-btn{
+  background:#00a884 !important;
+  color:#ffffff !important;
+  border-color:#00a884 !important;
+}
+
+.secondary{
+  background:#ffffff !important;
+  color:#111b21 !important;
+  border-color:#d1d7db !important;
+}
+
+.blue-btn{
+  background:#53bdeb !important;
+  color:#08212a !important;
+}
+
+.warning-btn{
+  background:#f0b429 !important;
+  color:#111b21 !important;
+}
+
+.danger-btn{
+  background:#ea0038 !important;
+  color:#ffffff !important;
+}
+
+/* الجداول */
+table{
+  color:#111b21 !important;
+}
+
+th{
+  background:#f0f2f5 !important;
+  color:#075e54 !important;
+  border-color:#d1d7db !important;
+}
+
+td{
+  color:#111b21 !important;
+  border-color:#e5e9eb !important;
+}
+
+tbody tr:hover{
+  background:#f5f6f6 !important;
+}
+
+/* النوافذ */
+.modal-overlay{
+  background:rgba(0,0,0,.45) !important;
+}
+
+.modal-card{
+  background:#ffffff !important;
+  color:#111b21 !important;
+  border:0 !important;
+  box-shadow:0 20px 60px rgba(0,0,0,.3) !important;
+}
+
+.modal-card h3,
+.modal-card h4{
+  color:#075e54 !important;
+}
+
+.modal-card input,
+.modal-card textarea,
+.modal-card select{
+  background:#ffffff !important;
+  color:#111b21 !important;
+  border-color:#d1d7db !important;
+}
+
+/* شاشة القفل */
+#lockScreen{
+  background:#efeae2 !important;
+  color:#111b21 !important;
+}
+
+/* بوابة الموقع */
+.gate{
+  background:rgba(0,0,0,.55) !important;
+}
+
+.gate .card{
+  background:#ffffff !important;
+  color:#111b21 !important;
+}
+
+/* الهاتف */
+@media(max-width:760px){
+
+  .sidebar{
+    background:#ffffff !important;
+  }
+
+  .messages{
+    background:#efeae2 !important;
+  }
+
+  .msg,
+  .message-bubble{
+    max-width:84% !important;
+  }
+
+  .composer{
+    background:#f0f2f5 !important;
+  }
+}
+
+/* =========================================================
+   END WHATSAPP VISUAL THEME
+========================================================= */
+
+
+
+/* =========================================================
+   TEXTAREA VISIBILITY FIX
+========================================================= */
+
+#messageInput,
+#messageInput:focus,
+#messageInput:hover,
+#messageInput:active,
+textarea,
+textarea:focus,
+textarea:hover,
+textarea:active{
+  background:#ffffff !important;
+  color:#111b21 !important;
+  -webkit-text-fill-color:#111b21 !important;
+  caret-color:#00a884 !important;
+  opacity:1 !important;
+  visibility:visible !important;
+  text-shadow:none !important;
+}
+
+#messageInput::placeholder,
+textarea::placeholder{
+  color:#667781 !important;
+  -webkit-text-fill-color:#667781 !important;
+  opacity:1 !important;
+}
+
+#messageInput:focus{
+  background:#ffffff !important;
+  color:#111b21 !important;
+  -webkit-text-fill-color:#111b21 !important;
+  border-color:#00a884 !important;
+  outline:none !important;
+  box-shadow:0 0 0 2px rgba(0,168,132,.15) !important;
+  caret-color:#00a884 !important;
+}
+
+
+
+
+
+/* =========================================================
+   MESSAGE INPUT — CLEAN VISIBILITY FIX
+========================================================= */
+
+#messageInput {
+    color: #111b21 !important;
+    background: #ffffff !important;
+    -webkit-text-fill-color: #111b21 !important;
+    caret-color: #00a884 !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    text-shadow: none !important;
+}
+
+#messageInput:focus,
+#messageInput:hover,
+#messageInput:active {
+    color: #111b21 !important;
+    background: #ffffff !important;
+    -webkit-text-fill-color: #111b21 !important;
+    caret-color: #00a884 !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    outline: none !important;
+}
+
+#messageInput::placeholder {
+    color: #667781 !important;
+    -webkit-text-fill-color: #667781 !important;
+    opacity: 1 !important;
+}
+
+/* منع قواعد textarea العامة من تغيير حقل الرسالة */
+.composer #messageInput,
+.composer #messageInput:focus,
+.composer #messageInput:hover,
+.composer #messageInput:active {
+    color: #111b21 !important;
+    background-color: #ffffff !important;
+    -webkit-text-fill-color: #111b21 !important;
+    caret-color: #00a884 !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+
+
+/* =========================================================
+   TOPBAR — FINAL ALIGNMENT
+========================================================= */
+
+.topbar{
+    min-height:60px !important;
+    height:60px !important;
+    width:100% !important;
+    box-sizing:border-box !important;
+
+    display:flex !important;
+    align-items:center !important;
+    justify-content:space-between !important;
+
+    gap:12px !important;
+    padding:8px 14px !important;
+
+    background:#075e54 !important;
+    color:#ffffff !important;
+
+    direction:rtl !important;
+    overflow:hidden !important;
+}
+
+/* جميع عناصر الشريط */
+.topbar > *{
+    min-width:0 !important;
+    margin:0 !important;
+}
+
+/* زر القائمة في الهاتف */
+#mobileMenuBtn{
+    flex:0 0 42px !important;
+    width:42px !important;
+    height:42px !important;
+    min-width:42px !important;
+    min-height:42px !important;
+
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+
+    padding:0 !important;
+    margin:0 !important;
+
+    border-radius:10px !important;
+}
+
+/* منطقة اسم البرنامج */
+.topbar .brand,
+.topbar .app-name,
+#appName{
+    flex:1 1 auto !important;
+    min-width:0 !important;
+
+    display:flex !important;
+    align-items:center !important;
+
+    overflow:hidden !important;
+}
+
+/* اسم البرنامج */
+.topbar .brand *,
+.topbar .app-name *,
+#appName{
+    white-space:nowrap !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+}
+
+/* اسم المستخدم */
+#identity{
+    flex:0 1 auto !important;
+    min-width:0 !important;
+
+    max-width:32vw !important;
+
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+
+    padding:6px 10px !important;
+    margin:0 !important;
+
+    color:#d9fdd3 !important;
+    background:rgba(255,255,255,.08) !important;
+
+    border:1px solid rgba(255,255,255,.12) !important;
+    border-radius:18px !important;
+
+    white-space:nowrap !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+
+    line-height:1.3 !important;
+}
+
+/* زر الخروج */
+#logoutBtn{
+    flex:0 0 auto !important;
+
+    min-width:72px !important;
+    min-height:40px !important;
+    height:40px !important;
+
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    gap:6px !important;
+
+    padding:7px 13px !important;
+    margin:0 !important;
+
+    border:1px solid rgba(255,255,255,.18) !important;
+    border-radius:20px !important;
+
+    background:rgba(255,255,255,.12) !important;
+    color:#ffffff !important;
+
+    font-size:13px !important;
+    font-weight:700 !important;
+    line-height:1 !important;
+
+    white-space:nowrap !important;
+}
+
+/* منع قواعد الأزرار العامة من تشويه زر الخروج */
+#logoutBtn:hover,
+#logoutBtn:focus,
+#logoutBtn:active{
+    background:rgba(255,255,255,.20) !important;
+    color:#ffffff !important;
+    transform:none !important;
+}
+
+/* الهاتف */
+@media(max-width:760px){
+
+    .topbar{
+        height:58px !important;
+        min-height:58px !important;
+        padding:6px 8px !important;
+        gap:7px !important;
+    }
+
+    #mobileMenuBtn{
+        width:40px !important;
+        height:40px !important;
+        min-width:40px !important;
+        min-height:40px !important;
+    }
+
+    #identity{
+        max-width:30vw !important;
+        padding:5px 8px !important;
+        font-size:12px !important;
+    }
+
+    #logoutBtn{
+        min-width:62px !important;
+        height:38px !important;
+        min-height:38px !important;
+        padding:6px 9px !important;
+        font-size:12px !important;
+    }
+}
+
+/* الشاشات الصغيرة جدًا */
+@media(max-width:420px){
+
+    .topbar{
+        padding:5px 6px !important;
+        gap:5px !important;
+    }
+
+    #identity{
+        max-width:27vw !important;
+        padding:4px 6px !important;
+        font-size:11px !important;
+    }
+
+    #logoutBtn{
+        min-width:58px !important;
+        padding:5px 7px !important;
+        font-size:11px !important;
+    }
+}
+
+</style>
+
+
+<style id="secure-message-input-final-visibility">
+#messageInput,
+#messageInput:focus,
+#messageInput:hover,
+#messageInput:active,
+.composer #messageInput {
+  color: #111b21 !important;
+  -webkit-text-fill-color: #111b21 !important;
+  background-color: #ffffff !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  caret-color: #00a884 !important;
+  text-shadow: none !important;
+  transform: none !important;
+  filter: none !important;
+}
+
+
+/* =========================================================
+   SECURE MESSENGER - KEYBOARD COMPOSER V4 CSS
+   طبقة نهائية لصندوق الرسائل ولوحة مفاتيح Android
+========================================================= */
+
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* منطقة الرسائل */
+#messages.messages {
+  min-height: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Composer */
+form#sendForm.composer {
+  position: relative !important;
+  z-index: 100 !important;
+
+  display: flex !important;
+  align-items: flex-end !important;
+
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+
+  flex-shrink: 0 !important;
+
+  padding:
+    8px
+    8px
+    calc(8px + env(safe-area-inset-bottom))
+    8px !important;
+
+  gap: 6px !important;
+
+  background: #f0f2f5 !important;
+  border-top: 1px solid #d1d7db !important;
+
+  box-shadow:
+    0 -2px 12px rgba(0,0,0,.10) !important;
+}
+
+/* حقل الرسالة */
+form#sendForm.composer #messageInput {
+
+  flex: 1 1 auto !important;
+
+  width: auto !important;
+  min-width: 0 !important;
+
+  min-height: 52px !important;
+  max-height: 150px !important;
+
+  height: 52px !important;
+
+  margin: 0 !important;
+
+  padding:
+    12px 15px !important;
+
+  box-sizing: border-box !important;
+
+  resize: none !important;
+
+  overflow-y: hidden !important;
+
+  border-radius: 22px !important;
+
+  border: 1px solid #ffffff !important;
+
+  background: #ffffff !important;
+
+  color: #111b21 !important;
+
+  font-size: 16px !important;
+  line-height: 1.5 !important;
+
+  -webkit-text-fill-color: #111b21 !important;
+
+  caret-color: #00a884 !important;
+
+  outline: none !important;
+
+  transform: none !important;
+
+  -webkit-appearance: none !important;
+  appearance: none !important;
+}
+
+/* التركيز */
+form#sendForm.composer #messageInput:focus {
+  border-color: #00a884 !important;
+
+  box-shadow:
+    0 0 0 1px rgba(0,168,132,.18) !important;
+}
+
+/* منع Zoom في Android/iOS */
+@media (max-width: 760px) {
+
+  form#sendForm.composer #messageInput {
+    font-size: 16px !important;
+  }
+
+}
+
+/* أزرار الأدوات */
+form#sendForm.composer > button {
+  flex: 0 0 42px !important;
+
+  width: 42px !important;
+  min-width: 42px !important;
+  max-width: 42px !important;
+
+  height: 42px !important;
+  min-height: 42px !important;
+
+  padding: 0 !important;
+
+  align-self: flex-end !important;
+
+  display: inline-flex !important;
+
+  align-items: center !important;
+  justify-content: center !important;
+
+  box-sizing: border-box !important;
+}
+
+/* زر الإرسال */
+form#sendForm.composer > button[type="submit"] {
+
+  flex: 0 0 46px !important;
+
+  width: 46px !important;
+  min-width: 46px !important;
+  max-width: 46px !important;
+
+  height: 46px !important;
+  min-height: 46px !important;
+
+  border-radius: 50% !important;
+
+  background: var(--accent-green, #00ff80) !important;
+}
+
+/* لوحة المفاتيح المفتوحة:
+   لا نحرك الصفحة بالقوة.
+   VisualViewport يتولى تقليص المساحة المرئية. */
+
+@media (max-width: 760px) {
+
+  body {
+    overscroll-behavior-y: none;
+  }
+
+  #messages.messages {
+    overscroll-behavior-y: contain;
+  }
+
+}
+
+/* الأجهزة ذات الحافة السفلية */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+
+  form#sendForm.composer {
+    padding-bottom:
+      calc(8px + env(safe-area-inset-bottom)) !important;
+  }
+
+}
+
+/* =========================================================
+   END KEYBOARD COMPOSER V4 CSS
+========================================================= */
+
+</style>
+
+</head>
+
+<body>
+<!-- بوابة الأذونات المطلوبة للصوت وGPS -->
+<div id="requiredPermissionsGate" class="hidden" style="
+  position:fixed;
+  inset:0;
+  z-index:99999;
+  background:#080d09;
+  color:#fff;
+  direction:rtl;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+">
+  <div style="
+    width:min(460px,100%);
+    background:#101812;
+    border:1px solid #00ff80;
+    border-radius:18px;
+    padding:25px;
+    text-align:center;
+    box-shadow:0 0 30px rgba(0,255,128,.15);
+  ">
+    <div style="font-size:42px;color:#00ff80;margin-bottom:12px;">
+      <i class="fa-solid fa-shield-halved"></i>
+    </div>
+
+    <h2 style="margin:0 0 12px;">تجهيز الاتصال الآمن</h2>
+
+    <p style="line-height:1.8;color:#cfd8d2;">
+      يجب السماح للموقع والميكروفون وتجهيز الصوت قبل الدخول إلى نظام المراسلة.
+    </p>
+
+    <div id="permissionGpsStatus" style="margin:12px 0;">
+      📍 الموقع: <span>في انتظار الإذن</span>
+    </div>
+
+    <div id="permissionMicStatus" style="margin:12px 0;">
+      🎙️ الميكروفون: <span>في انتظار الإذن</span>
+    </div>
+
+    <div id="permissionAudioStatus" style="margin:12px 0;">
+      🔊 الصوت والسماعة: <span>في انتظار التهيئة</span>
+    </div>
+
+    <button id="requestRequiredPermissionsBtn" type="button" style="
+      width:100%;
+      margin-top:18px;
+      padding:14px;
+      border:0;
+      border-radius:12px;
+      background:#00ff80;
+      color:#061009;
+      font-weight:800;
+      font-size:16px;
+      cursor:pointer;
+    ">
+      <i class="fa-solid fa-play"></i>
+      تفعيل GPS والصوت
+    </button>
+
+    <div id="permissionError" style="
+      margin-top:12px;
+      color:#ff334b;
+      font-size:13px;
+    "></div>
+  </div>
+</div>
+
+
+<div id="connectionNotice" class="connection-strip"></div>
+
+<!-- شاشة السماح بالموقع -->
+<div id="locationGate" class="gate hidden">
+  <div class="card location-card">
+    <div style="font-size:40px;color:var(--accent-blue);margin-bottom:15px"><i class="fa-solid fa-location-dot"></i></div>
+    <h2 style="margin-bottom:10px">السماح بالموقع</h2>
+    <p style="color:#aaa;font-size:14px;margin-bottom:20px">
+      يطلب النظام إذن الموقع عند فتح التطبيق. الموقع المرسل لا يظهر إلا للمشرف.
+    </p>
+    <button id="allowLocation" class="primary-btn"><i class="fa-solid fa-location-crosshairs"></i> منح إذن الموقع</button>
+    <button id="skipLocation" class="secondary"><i class="fa-solid fa-ban"></i> المتابعة بدون الموقع</button>
+  </div>
+</div>
+
+<!-- تسجيل الدخول -->
+<section id="loginPage" class="auth-page">
+  <div class="auth-card">
+    <div style="text-align:center;margin-bottom:25px">
+      <div style="width:72px;height:72px;border:2px solid var(--accent-green);border-radius:50%;margin:0 auto 15px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 15px rgba(0,255,128,.2)">
+        <i class="fa-solid fa-diamond" style="font-size:26px;color:var(--accent-green)"></i>
+      </div>
+      <h2 style="color:var(--accent-green);font-size:24px;font-weight:700;margin-bottom:4px">Encrypted Military Messaging System</h2>
+      <p style="font-size:13px;color:#888;letter-spacing:.5px">Command Edition V5.2</p>
+    </div>
+
+    <form id="loginForm">
+      <!-- بيانات الدخول ثابتة داخليًا ولا تظهر للمستخدم -->
+      <div class="input-group"><label for="loginUsername">اسم المستخدم</label><div class="input-wrapper"><input id="loginUsername" name="username" type="text" autocomplete="username" placeholder="أدخل اسم المستخدم" required></div></div>
+      <input id="loginNickname" name="nickname" type="hidden" value="">
+      <input id="loginEmployee" name="employee_number" type="hidden" value="">
+      <div class="input-group"><label for="loginPassword">كلمة المرور</label><div class="input-wrapper"><input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="أدخل كلمة المرور" required></div></div>
+
+      <div class="notice blue">
+        <i class="fa-solid fa-shield-halved"></i>
+        تسجيل الدخول الآمن للنظام
+      </div>
+
+      <button type="submit" class="login-button">
+        <i class="fa-solid fa-arrow-right-to-bracket"></i>
+        <span>دخول آمن</span>
+      </button>
+    </form>
+
+    <div id="loginError" class="error"></div>
+  </div>
+</section>
+
+<!-- التطبيق الرئيسي -->
+
+<!-- =====================================================
+     صفحة لوحة تحكم مسؤول النظام
+===================================================== -->
+<section
+  id="adminDataPage"
+  class="hidden"
+  style="
+    min-height:100vh;
+    width:100%;
+    box-sizing:border-box;
+  "
+>
+  <div
+    style="
+      width:100%;
+      max-width:1100px;
+      margin:0 auto;
+      padding:15px;
+      box-sizing:border-box;
+    "
+  >
+
+    <div
+      style="
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        margin-bottom:15px;
+      "
+    >
+
+      <div>
+        <h2 style="margin:0">
+          <i class="fa-solid fa-shield-halved"></i>
+          لوحة تحكم مسؤول النظام
+        </h2>
+
+        <div
+          style="
+            margin-top:5px;
+            opacity:.7;
+            font-size:13px;
+          "
+        >
+          إدارة النظام وصلاحيات المشرف
+        </div>
+      </div>
+
+      <button
+        id="adminDataBackBtn"
+        class="secondary"
+        type="button"
+      >
+        <i class="fa-solid fa-arrow-right"></i>
+        المراسلة
+      </button>
+
+    </div>
+
+    <div
+      id="adminDataPageContent"
+      style="width:100%;"
+    ></div>
+
+  </div>
+</section>
+
+
+
+
+<section id="appPage" class="app-page hidden">
+
+<!-- =====================================================
+     التنقل بين صفحات التطبيق
+===================================================== -->
+<nav
+  id="mainPagesNav"
+  style="
+    width:100%;
+    max-width:1100px;
+    margin:0 auto 12px auto;
+    padding:0 12px;
+    box-sizing:border-box;
+  "
+>
+
+  <div
+    style="
+      display:flex;
+      gap:8px;
+      width:100%;
+      background:rgba(0,0,0,.18);
+      border:1px solid rgba(0,255,128,.15);
+      border-radius:12px;
+      padding:5px;
+      box-sizing:border-box;
+    "
+  >
+
+    <button
+      id="messagesPageBtn"
+      type="button"
+      class="secondary"
+      style="
+        flex:1;
+        min-height:48px;
+        font-size:16px;
+      "
+    >
+      <i class="fa-solid fa-comments"></i>
+      المراسلة
+    </button>
+
+    <button
+      id="adminDataPageBtn"
+      type="button"
+      class="secondary hidden"
+      style="
+        flex:1;
+        min-height:48px;
+        font-size:16px;
+      "
+    >
+      <i class="fa-solid fa-shield-halved"></i>
+      لوحة تحكم مسؤول النظام
+    </button>
+
+  </div>
+
+</nav>
+
+  <header class="topbar">
+    <div style="display:flex;align-items:center;gap:10px">
+      <button id="mobileMenuBtn" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer" type="button">
+        <i class="fa-solid fa-bars"></i>
+      </button>
+      <strong>Encrypted Military Messaging System</strong>
+    </div>
+    <div style="display:flex;align-items:center;gap:15px">
+      <span id="identity">-</span>
+        <button id="personalDataBtn" class="secondary" type="button" style="border-color:var(--accent-green);color:var(--accent-green);padding:6px 12px;border-radius:6px;cursor:pointer">
+          <i class="fa-solid fa-id-card"></i> تسجيل البيانات الشخصية
+        </button>
+      <button id="logoutBtn" style="background:var(--accent-red);border:none;color:#fff;padding:6px 12px;border-radius:6px;cursor:pointer" type="button">
+        <i class="fa-solid fa-right-from-bracket"></i> خروج
+      </button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside id="sidebar" class="sidebar">
+      <div style="padding:12px;border-bottom:1px solid var(--border-color)">
+        <h3>قائمة الاتصالات</h3>
+      </div>
+
+      <div style="padding:12px;flex:1;overflow-y:auto">
+        <div id="usersList"></div>
+
+        <!-- المحادثات الجماعية -->
+        <div
+          id="groupsSection"
+          style="
+            margin-top:14px;
+            border-top:1px solid var(--border-color);
+            padding-top:12px;
+          "
+        >
+          <div
+            style="
+              display:flex;
+              align-items:center;
+              justify-content:space-between;
+              margin-bottom:8px;
+              color:var(--accent-green);
+              font-weight:700;
+            "
+          >
+            <span>
+              <i class="fa-solid fa-users"></i>
+              المحادثات الجماعية
+            </span>
+
+            <div style="display:flex;align-items:center;gap:6px">
+              <button
+                id="createGroupBtn"
+                type="button"
+                title="إنشاء مجموعة"
+                style="width:30px;height:30px;border-radius:6px;border:1px solid rgba(0,255,128,.35);background:rgba(0,255,128,.08);color:var(--accent-green);cursor:pointer"
+              >
+                <i class="fa-solid fa-plus"></i>
+              </button>
+
+              <span
+                id="groupsCount"
+                style="
+                min-width:24px;
+                text-align:center;
+                padding:2px 7px;
+                border-radius:12px;
+                background:rgba(0,255,128,.10);
+                border:1px solid rgba(0,255,128,.25);
+                font-size:11px;
+              "
+            >0</span>
+            </div>
+          </div>
+
+          <div id="groupsList"></div>
+        </div>
+
+        <!-- لوحة تحكم مسؤول النظام -->
+        <div id="adminPanel" class="hidden" style="margin-top:15px;padding:10px;background:rgba(0,255,128,.05);border:1px solid rgba(0,255,128,.2);border-radius:8px">
+          <h4 style="color:var(--accent-green);margin-bottom:8px"><i class="fa-solid fa-user-shield"></i> لوحة تحكم مسؤول النظام</h4>
+
+          <div class="stats">
+            <div class="stat"><b id="teamTotal">0</b><span>إجمالي العدد</span></div>
+            <div class="stat"><b id="usersTotal">0</b><span>إجمالي المستخدمين فقط</span></div>
+          </div>
+
+          <div class="admin-section">
+            <div class="admin-title">بيانات الفريق</div>
+            <div class="input-group">
+              <label for="teamName">اسم الفرقة</label>
+              <input id="teamName" type="text" style="width:100%;padding:8px;background:rgba(255,255,255,.03);border:1px solid var(--border-color);color:#fff;border-radius:6px">
+            </div>
+            <div class="input-group">
+              <label for="teamMission">المهمة</label>
+              <textarea id="teamMission" rows="2" style="width:100%;padding:8px;background:rgba(255,255,255,.03);border:1px solid var(--border-color);color:#fff;border-radius:6px;resize:vertical"></textarea>
+            </div>
+            <button id="saveTeamBtn" class="primary-btn">حفظ بيانات الفريق</button>
+          </div>
+
+          <div class="admin-grid">
+            <button id="addUserBtn" class="secondary"><i class="fa-solid fa-user-plus"></i> إضافة مستخدم</button>
+            <button id="blockUserBtn" class="secondary"><i class="fa-solid fa-ban"></i> حظر مستخدم</button>
+            <button id="freezeUserBtn" class="secondary"><i class="fa-solid fa-snowflake"></i> تجميد مستخدم</button>
+            <button id="releaseUserBtn" class="secondary"><i class="fa-solid fa-unlock"></i> إطلاق وفك التجميد</button>
+<button id="appLockBtn" class="secondary">
+  <i class="fa-solid fa-lock"></i> قفل التطبيق
+</button>
+
+            <button id="clearChatBtn" class="secondary"><i class="fa-solid fa-trash"></i> مسح المحادثة</button>
+            <button id="backupBtn" class="secondary"><i class="fa-solid fa-file-export"></i> نسخة احتياطية</button>
+            <button id="locationsBtn" class="secondary"><i class="fa-solid fa-location-dot"></i> معرفة المواقع</button>
+            <button id="warningsBtn" class="secondary"><i class="fa-solid fa-triangle-exclamation"></i> استعراض تحذيرات النظام</button>
+            <button id="broadcastBtn" class="secondary"><i class="fa-solid fa-bullhorn"></i> رسالة للجميع</button>
+            
+            <button id="manageUsersBtn" class="secondary"><i class="fa-solid fa-users-gear"></i> إدارة الحسابات</button>
+              <button id="userReportsBtn" class="secondary">
+                <i class="fa-solid fa-users-viewfinder"></i> تقرير الوحدات والفرق
+              </button>
+              <button id="credentialsReportBtn" class="secondary">
+                <i class="fa-solid fa-id-card-clip"></i> تقرير الحسابات
+              </button>
+            <button id="channelsBtn" class="secondary"><i class="fa-solid fa-tower-broadcast"></i> القنوات</button>
+            <button id="auditBtn" class="secondary"><i class="fa-solid fa-list-check"></i> سجل النظام</button>
+            <button id="updateDatabaseBtn" class="blue-btn"><i class="fa-solid fa-arrows-rotate"></i> تحديث قاعدة البيانات</button>
+            <button id="alertModeBtn" class="warning-btn"><i class="fa-solid fa-triangle-exclamation"></i> حالة التأهب</button>
+            <button id="networkOffBtn" class="danger-btn"><i class="fa-solid fa-power-off"></i> إطفاء الشبكة</button>
+            <button id="networkRestartBtn" class="primary-btn"><i class="fa-solid fa-rotate"></i> إعادة تشغيل النظام</button>
+          </div>
+
+          <div id="adminStatus" class="notice blue hidden"></div>
+        </div>
+      </div>
+    </aside>
+
+    <section class="chat">
+      <div style="padding:12px 16px;background:var(--bg-secondary);border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center">
+        <h2 id="chatTitle" style="font-size:16px">اختر مستخدماً</h2>
+        <span id="chatStatus" style="font-size:12px;color:var(--accent-green)">مشفر E2EE آمن</span>
+      </div>
+
+      <div id="messages" class="messages">
+        <div style="text-align:center;color:#666;margin-top:40px">اختر مستخدماً من القائمة لبدء المحادثة</div>
+      </div>
+
+      <form id="sendForm" class="composer">
+        <input id="attachmentInput" type="file" class="hidden" accept="*/*">
+        <input id="cameraInput" type="file" class="hidden" accept="image/*" capture="environment">
+        <button id="attachBtn" type="button" style="background:none;border:none;color:var(--accent-green);font-size:20px;cursor:pointer" title="إرفاق صورة أو مقطع صوتي">
+          <i class="fa-solid fa-paperclip"></i>
+        </button>
+        <button id="cameraBtn" type="button" style="background:none;border:none;color:var(--accent-blue);font-size:20px;cursor:pointer" title="فتح الكاميرا">
+          <i class="fa-solid fa-camera"></i>
+        </button>
+        <button id="voiceBtn" type="button" style="background:none;border:none;color:var(--accent-blue);font-size:20px;cursor:pointer" title="تسجيل مقطع صوتي">
+          <i class="fa-solid fa-microphone"></i>
+        </button>
+
+        <button id="viewOnceBtn" type="button" style="background:none;border:none;color:#f59e0b;font-size:20px;cursor:pointer" title="رسالة مؤقتة - تفتح مرة واحدة">
+          <i class="fa-solid fa-clock"></i>
+        </button>
+        <textarea id="messageInput" rows="5" maxlength="5000" placeholder="اكتب الرسالة... (حتى 5000 حرف)" autocomplete="off" required style="min-height:120px;max-height:360px;resize:vertical;overflow-y:auto;width:100%;box-sizing:border-box;font-size:22px;"></textarea>
+        <button type="submit" style="background:var(--accent-green);border:none;border-radius:8px;width:46px;height:46px;cursor:pointer;color:#000">
+          <i class="fa-solid fa-paper-plane"></i>
+        </button>
+      </form>
+      <div id="attachmentInfo" class="file-name" style="padding:0 12px 7px"></div>
+    </section>
+  </main>
+</section>
+
+<!-- نافذة النظام -->
+<div id="modal" class="modal hidden">
+  <div class="modal-overlay"></div>
+  <div class="modal-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;border-bottom:1px solid var(--border-color);padding-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">
+        <button
+          id="backModal"
+          type="button"
+          title="عودة"
+          aria-label="عودة"
+          style="background:rgba(0,168,132,.18);border:1px solid rgba(0,168,132,.5);color:#fff;font-size:18px;cursor:pointer;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none"
+        >
+          <i class="fa-solid fa-arrow-right"></i>
+        </button>
+
+        <h3 id="modalTitle" style="margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          نافذة النظام
+        </h3>
+      </div>
+
+      <button
+        id="closeModal"
+        type="button"
+        title="إغلاق"
+        aria-label="إغلاق"
+        style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;flex:none"
+      >
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div id="modalBody" style="padding-top:15px;overflow-y:auto;flex:1"></div>
+  </div>
+</div>
+
+<!-- شاشة القفل -->
+<div id="lockScreen" class="lock-screen hidden">
+  <i class="fa-solid fa-lock" style="font-size:60px;color:var(--accent-red);margin-bottom:20px"></i>
+  <h2>تم قفل التطبيق</h2>
+  <p id="lockReason" style="color:#aaa;max-width:400px;margin-top:10px">
+    التطبيق مقفل من قبل المشرف.
+  </p>
+</div>
+
+<button id="mobileBackBtn" class="hidden" style="position:fixed;bottom:20px;left:20px;z-index:9999;background:var(--accent-blue);border:none;color:#000;width:45px;height:45px;border-radius:50%;cursor:pointer">
+  <i class="fa-solid fa-arrow-right"></i>
+</button>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""></script>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="app.js"></script>
+
+
+
+
+
+
+</body>
+</html>
