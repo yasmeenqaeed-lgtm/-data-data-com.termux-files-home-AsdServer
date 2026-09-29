@@ -19,9 +19,30 @@ data-internet/
 local-server/
 
 *.bak
+*.bak-*
 *.backup
+*.backup*
 *.before-*
 *.broken-*
 *.WORKING-BACKUP
 *.BEFORE-WORKING-RESTORE
+*.skycut-backup
 
+# Local repair scripts
+apply-*.js
+fix-*.js
+resize-*.js
+
+# Arabic backup files/directories
+*نسخة احتياطية*
+
+# Temporary artifact names accidentally created
+80
+{
+tatus --short
+h =====\"
+--short
+ize-*.js
+kycut-backup
+qlite
+ync-secret
