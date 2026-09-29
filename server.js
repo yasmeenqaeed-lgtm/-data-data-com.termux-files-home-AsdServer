@@ -4862,7 +4862,31 @@ app.get(
                         updated_at
                     FROM user_personal_data
                     ORDER BY id
-                `)
+                `),
+
+                groups: all(`
+                    SELECT
+                        id,
+                        name,
+                        description,
+                        created_by,
+                        created_at,
+                        updated_at
+                    FROM groups
+                    ORDER BY id
+                `),
+
+                group_members: all(`
+                    SELECT
+                        id,
+                        group_id,
+                        user_id,
+                        role,
+                        joined_at
+                    FROM group_members
+                    ORDER BY id
+                `),
+
             };
 
             return res.json(payload);
@@ -5279,6 +5303,159 @@ app.post(
                         ]
                     );
                 }
+            }
+
+            /*
+             * المجموعات
+             */
+            for (const group of data.groups || []) {
+
+                const creatorId =
+                    userMap.get(Number(group.created_by));
+
+                if (!creatorId) continue;
+
+                const existingGroup = one(
+                    "SELECT id FROM groups WHERE id = ?",
+                    [String(group.id)]
+                );
+
+                if (existingGroup) {
+
+                    run(
+                        `UPDATE groups
+                         SET name = ?,
+                             description = ?,
+                             created_by = ?,
+                             created_at = ?,
+                             updated_at = ?
+                         WHERE id = ?`,
+                        [
+                            group.name || "",
+                            group.description || "",
+                            creatorId,
+                            group.created_at || now(),
+                            group.updated_at || now(),
+                            String(group.id)
+                        ]
+                    );
+
+                } else {
+
+                    run(
+                        `INSERT INTO groups (
+                            id,
+                            name,
+                            description,
+                            created_by,
+                            created_at,
+                            updated_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?)`,
+                        [
+                            String(group.id),
+                            group.name || "",
+                            group.description || "",
+                            creatorId,
+                            group.created_at || now(),
+                            group.updated_at || now()
+                        ]
+                    );
+                }
+            }
+
+            /*
+             * أعضاء المجموعات
+             */
+            for (const member of data.group_members || []) {
+
+                const mappedUserId =
+                    userMap.get(Number(member.user_id));
+
+                if (!mappedUserId) continue;
+
+                const existingMember = one(
+                    `SELECT id
+                     FROM group_members
+                     WHERE group_id = ?
+                       AND user_id = ?
+                     LIMIT 1`,
+                    [
+                        String(member.group_id),
+                        mappedUserId
+                    ]
+                );
+
+                if (existingMember) {
+
+                    run(
+                        `UPDATE group_members
+                         SET role = ?,
+                             joined_at = ?
+                         WHERE group_id = ?
+                           AND user_id = ?`,
+                        [
+                            member.role || "member",
+                            member.joined_at || now(),
+                            String(member.group_id),
+                            mappedUserId
+                        ]
+                    );
+
+                } else {
+
+                    run(
+                        `INSERT INTO group_members (
+                            group_id,
+                            user_id,
+                            role,
+                            joined_at
+                        )
+                        VALUES (?, ?, ?, ?)`,
+                        [
+                            String(member.group_id),
+                            mappedUserId,
+                            member.role || "member",
+                            member.joined_at || now()
+                        ]
+                    );
+                }
+            }
+
+            /*
+             * حالة النظام
+             */
+            if (
+                Array.isArray(data.system_state) &&
+                data.system_state.length
+            ) {
+
+                const state = data.system_state[0];
+
+                run(
+                    `INSERT INTO system_state (
+                        id,
+                        alert_mode,
+                        network_mode,
+                        network_name,
+                        app_lock,
+                        updated_at
+                    )
+                    VALUES (1, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        alert_mode = excluded.alert_mode,
+                        network_mode = excluded.network_mode,
+                        network_name = excluded.network_name,
+                        app_lock = excluded.app_lock,
+                        updated_at = excluded.updated_at`,
+                    [
+                        Number(state.alert_mode || 0),
+                        state.network_mode || "local",
+                        state.network_name || "",
+                        Number(state.app_lock || 0),
+                        state.updated_at || now()
+                    ]
+                );
             }
 
             /*
