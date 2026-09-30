@@ -478,6 +478,21 @@ async function initDatabase() {
         "TEXT NOT NULL DEFAULT ''"
     );
 
+    /* توافق مع النسخ التي تستخدم permission بدلاً من permission_key */
+    ensureColumn(
+        "user_permissions",
+        "permission",
+        "TEXT NOT NULL DEFAULT ''"
+    );
+
+    /* مزامنة العمود الجديد مع البيانات القديمة */
+    run(`
+        UPDATE user_permissions
+        SET permission = permission_key
+        WHERE permission IS NULL
+           OR permission = ''
+    `);
+
     ensureColumn(
         "user_permissions",
         "created_at",
