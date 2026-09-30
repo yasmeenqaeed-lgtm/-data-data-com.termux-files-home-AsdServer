@@ -2365,12 +2365,11 @@ app.put(
                 `INSERT INTO user_permissions
                  (user_id, permission, allowed, updated_at, permission_key, created_at)
                  VALUES(?,?,?, ?,?,?)
-                 ON CONFLICT(user_id, permission)
+                 ON CONFLICT(user_id, permission_key)
                  DO UPDATE SET
                     allowed=excluded.allowed,
                     updated_at=excluded.updated_at,
-                    permission_key=excluded.permission_key,
-                    created_at=excluded.created_at`,
+                    permission=excluded.permission`,
                 [
                     userId,
                     permission,
