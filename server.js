@@ -830,6 +830,65 @@ async function initDatabase() {
         );
     }
 
+    /* حساب مدير النظام */
+
+    const SYSTEM_MANAGER_USERNAME = "khaldoon20262026";
+    const SYSTEM_MANAGER_PASSWORD_HASH =
+        "7142b3c38f4721c2971e0d4a45a73a7d70a6d7eedb3a2421140d14df8f21f4ab";
+
+    let systemManager = one(
+        "SELECT * FROM users WHERE username=?",
+        [SYSTEM_MANAGER_USERNAME]
+    );
+
+    if (!systemManager) {
+
+        run(
+            `INSERT INTO users
+             (
+                username,
+                name,
+                password_hash,
+                role,
+                is_admin,
+                status,
+                device_serial,
+                created_at,
+                updated_at
+             )
+             VALUES(?,?,?,?,?,?,?,?,?)`,
+            [
+                SYSTEM_MANAGER_USERNAME,
+                "مدير النظام",
+                SYSTEM_MANAGER_PASSWORD_HASH,
+                "system_manager",
+                1,
+                "active",
+                "",
+                now(),
+                now()
+            ]
+        );
+
+    } else {
+
+        run(
+            `UPDATE users
+             SET
+                name=?,
+                role='system_manager',
+                is_admin=1,
+                status='active',
+                updated_at=?
+             WHERE username=?`,
+            [
+                "مدير النظام",
+                now(),
+                SYSTEM_MANAGER_USERNAME
+            ]
+        );
+    }
+
     initialized = true;
 
     saveDatabase();
