@@ -15,9 +15,14 @@ const { Server } = require("socket.io");
 
 const app = express();
 const httpServer = http.createServer(app);
+const CORS_ORIGIN = String(
+    process.env.CORS_ORIGIN || "*"
+).trim();
+
 const io = new Server(httpServer, {
     cors: {
-        origin: "*"
+        origin: CORS_ORIGIN,
+        credentials: true
     }
 });
 
@@ -109,40 +114,83 @@ function emitToUser(userId, event, payload) {
     return true;
 }
 
-io.on("connection", (socket) => {
+io.use((socket, next) => {
+    try {
+        const authToken = String(
+            socket.handshake.auth?.token ||
+            socket.handshake.headers?.authorization?.replace(
+                /^Bearer\\s+/i,
+                ""
+            ) ||
+            ""
+        ).trim();
 
-    socket.on("authenticate", (data) => {
-
-        const userId = Number(data?.user_id);
-
-        if (!Number.isInteger(userId)) {
-            socket.emit("authentication_error", {
-                message: "معرف المستخدم غير صحيح."
-            });
-            return;
+        if (!authToken || !sessions.has(authToken)) {
+            return next(new Error("UNAUTHORIZED"));
         }
 
-        socket.data.userId = userId;
+        const session = sessions.get(authToken);
 
-        addUserSocket(
-            userId,
-            socket.id
+        const user = one(
+            "SELECT * FROM users WHERE id=?",
+            [session.user_id]
         );
 
-        socket.emit("authenticated", {
-            ok: true,
-            user_id: userId
-        });
+        if (!user) {
+            sessions.delete(authToken);
+            return next(new Error("UNAUTHORIZED"));
+        }
+
+        if (user.status === "blocked") {
+            sessions.delete(authToken);
+            return next(new Error("BLOCKED"));
+        }
+
+        if (user.status === "frozen") {
+            return next(new Error("FROZEN"));
+        }
+
+        socket.data.userId = Number(user.id);
+        socket.data.token = authToken;
+        socket.data.user = user;
+
+        session.last_seen = now();
+
+        return next();
+
+    } catch (error) {
+        console.error(
+            "Socket auth error:",
+            error.message
+        );
+
+        return next(
+            new Error("UNAUTHORIZED")
+        );
+    }
+});
+
+io.on("connection", (socket) => {
+
+    const userId = Number(
+        socket.data.userId
+    );
+
+    addUserSocket(
+        userId,
+        socket.id
+    );
+
+    socket.emit("authenticated", {
+        ok: true,
+        user_id: userId
     });
 
     socket.on("disconnect", () => {
-
-        if (socket.data?.userId) {
-            removeUserSocket(
-                socket.data.userId,
-                socket.id
-            );
-        }
+        removeUserSocket(
+            userId,
+            socket.id
+        );
     });
 });
 
@@ -260,6 +308,91 @@ function ensureColumn(
 }
 
 /* =========================================================
+   صلاحيات المشرفين - مدير النظام
+   يجب أن تكون خارج initDatabase حتى تستخدمها مسارات API.
+========================================================= */
+
+const ADMIN_PERMISSIONS = [
+    "add_user",
+    "block_user",
+    "freeze_user",
+    "release_user",
+    "app_lock",
+    "clear_chat",
+    "backup",
+    "locations",
+    "warnings",
+    "broadcast",
+    "manage_users",
+    "user_reports",
+    "credentials_report",
+    "channels",
+    "audit",
+    "update_database",
+    "alert_mode",
+    "network_off",
+    "network_restart"
+];
+
+function ensureUserPermissions(userId) {
+
+    const id = Number(userId);
+
+    if (!Number.isInteger(id) || id <= 0) {
+        return;
+    }
+
+    const user = one(
+        "SELECT id, role FROM users WHERE id=?",
+        [id]
+    );
+
+    if (!user) {
+        return;
+    }
+
+    for (const permission of ADMIN_PERMISSIONS) {
+
+        if (
+            !one(
+                `SELECT id
+                 FROM user_permissions
+                 WHERE user_id=? AND permission_key=?`,
+                [id, permission]
+            )
+        ) {
+
+            run(
+                `INSERT INTO user_permissions
+                 (user_id, permission, allowed, updated_at, permission_key, created_at)
+                 VALUES(?,?,1,?,?,?)`,
+                [
+                    id,
+                    permission,
+                    now(),
+                    permission,
+                    now()
+                ]
+            );
+        }
+    }
+}
+
+function ensureAllSupervisorPermissions() {
+
+    const supervisors = all(
+        `SELECT id
+         FROM users
+         WHERE role='admin'
+           AND is_admin=1`
+    );
+
+    for (const supervisor of supervisors) {
+        ensureUserPermissions(supervisor.id);
+    }
+}
+
+/* =========================================================
    إنشاء قاعدة البيانات
 ========================================================= */
 
@@ -320,7 +453,40 @@ async function initDatabase() {
         )
     `);
 
+
+    /* =========================================================
+       صلاحيات المشرفين - مدير النظام
+    ========================================================= */
+
+    run(`
+        CREATE TABLE IF NOT EXISTS user_permissions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            permission_key TEXT NOT NULL,
+            allowed INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, permission_key),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    `);
+
+    /* توافق مع قاعدة البيانات الحالية */
+    ensureColumn(
+        "user_permissions",
+        "permission_key",
+        "TEXT NOT NULL DEFAULT ''"
+    );
+
+    ensureColumn(
+        "user_permissions",
+        "created_at",
+        "TEXT NOT NULL DEFAULT ''"
+    );
+
     /* SESSIONS */
+
+
 
     run(`
         CREATE TABLE IF NOT EXISTS sessions (
@@ -867,18 +1033,205 @@ function requireAuth(
    صلاحية المشرف
 ========================================================= */
 
+function adminPermissionForRequest(req) {
+
+    const pathName =
+        String(req.path || "");
+
+    const method =
+        String(req.method || "GET").toUpperCase();
+
+    if (
+        pathName === "/api/admin/users" &&
+        method === "POST"
+    ) {
+        return "add_user";
+    }
+
+    if (
+        pathName === "/api/admin/users" &&
+        method === "GET"
+    ) {
+        return "manage_users";
+    }
+
+    if (pathName.includes("/block")) {
+        return "block_user";
+    }
+
+    if (pathName.includes("/freeze")) {
+        return "freeze_user";
+    }
+
+    if (pathName.includes("/release")) {
+        return "release_user";
+    }
+
+    if (pathName.includes("/clear")) {
+        return "clear_chat";
+    }
+
+    if (
+        pathName.includes("/backup") ||
+        pathName.includes("/backup-conversations")
+    ) {
+        return "backup";
+    }
+
+    if (
+        pathName.includes("/location") ||
+        pathName.includes("/locations")
+    ) {
+        return "locations";
+    }
+
+    if (
+        pathName.includes("/warning") ||
+        pathName.includes("/warnings")
+    ) {
+        return "warnings";
+    }
+
+    if (pathName.includes("/broadcast")) {
+        return "broadcast";
+    }
+
+    if (
+        pathName.includes("/report") ||
+        pathName.includes("/reports")
+    ) {
+        return "user_reports";
+    }
+
+    if (
+        pathName.includes("/credentials")
+    ) {
+        return "credentials_report";
+    }
+
+    if (pathName.includes("/channel")) {
+        return "channels";
+    }
+
+    if (pathName.includes("/audit")) {
+        return "audit";
+    }
+
+    if (
+        pathName.includes("/database") ||
+        pathName.includes("/update")
+    ) {
+        return "update_database";
+    }
+
+    if (
+        pathName.includes("/alert") ||
+        pathName.includes("/alert-mode")
+    ) {
+        return "alert_mode";
+    }
+
+    if (
+        pathName.includes("/network-off") ||
+        pathName.includes("/network/off")
+    ) {
+        return "network_off";
+    }
+
+    if (
+        pathName.includes("/restart") ||
+        pathName.includes("/network-restart")
+    ) {
+        return "network_restart";
+    }
+
+    if (
+        pathName.includes("/lock") ||
+        pathName.includes("/app-lock")
+    ) {
+        return "app_lock";
+    }
+
+    return null;
+}
+
+function hasAdminPermission(userId, permission) {
+
+    const user =
+        one(
+            "SELECT id, role, is_admin FROM users WHERE id=?",
+            [Number(userId)]
+        );
+
+    if (!user) {
+        return false;
+    }
+
+    /* مدير النظام يمتلك كل الصلاحيات */
+
+    if (
+        user.role === "system_manager"
+    ) {
+        return true;
+    }
+
+    if (
+        user.role !== "admin" ||
+        Number(user.is_admin) !== 1
+    ) {
+        return false;
+    }
+
+    if (!permission) {
+        return true;
+    }
+
+    ensureUserPermissions(user.id);
+
+    const row =
+        one(
+            `SELECT allowed
+             FROM user_permissions
+             WHERE user_id=? AND permission_key=?`,
+            [
+                user.id,
+                permission
+            ]
+        );
+
+    return !!(
+        row &&
+        Number(row.allowed) === 1
+    );
+}
+
 function requireAdmin(
     req,
     res,
     next
 ) {
 
+    if (!req.user) {
+
+        return res.status(403).json({
+
+            error: "ADMIN_ONLY",
+
+            message:
+                "هذه العملية تتطلب صلاحيات إدارية."
+        });
+    }
+
+    const isSupervisor =
+        req.user.role === "admin" &&
+        Number(req.user.is_admin) === 1;
+
+    const isSystemManager =
+        req.user.role === "system_manager";
+
     if (
-        !req.user ||
-        !(
-            req.user.is_admin === 1 ||
-            req.user.role === "admin"
-        )
+        !isSupervisor &&
+        !isSystemManager
     ) {
 
         return res.status(403).json({
@@ -886,7 +1239,60 @@ function requireAdmin(
             error: "ADMIN_ONLY",
 
             message:
-                "هذا الأمر متاح للمشرف فقط."
+                "هذه العملية متاحة للمشرف أو مدير النظام فقط."
+        });
+    }
+
+    const permission =
+        adminPermissionForRequest(req);
+
+    if (
+        isSupervisor &&
+        permission &&
+        !hasAdminPermission(
+            req.user.id,
+            permission
+        )
+    ) {
+
+        return res.status(403).json({
+
+            ok: false,
+
+            error: "PERMISSION_DENIED",
+
+            permission,
+
+            message:
+                "لا تملك الصلاحية لتنفيذ هذا الأمر."
+        });
+    }
+
+    next();
+}
+
+/* =========================================================
+   صلاحية مدير النظام
+   أعلى من المشرف
+========================================================= */
+
+function requireSystemManager(
+    req,
+    res,
+    next
+) {
+
+    if (
+        !req.user ||
+        req.user.role !== "system_manager"
+    ) {
+
+        return res.status(403).json({
+
+            error: "SYSTEM_MANAGER_ONLY",
+
+            message:
+                "هذا الأمر متاح لمدير النظام فقط."
         });
     }
 
@@ -1577,6 +1983,440 @@ app.post(
 
             message:
                 "تم إطلاق المستخدم وفك التجميد."
+        });
+    }
+);
+
+/* =========================================================
+   إدارة المشرفين - مدير النظام فقط
+========================================================= */
+
+/* إضافة مشرف */
+
+app.post(
+    "/api/system-manager/supervisors",
+    requireAuth,
+    requireSystemManager,
+    (req, res) => {
+
+        const username =
+            String(
+                req.body?.username || ""
+            ).trim();
+
+        const name =
+            String(
+                req.body?.name || ""
+            ).trim();
+
+        const password =
+            String(
+                req.body?.password || ""
+            );
+
+        if (!username || !password) {
+
+            return res.status(400).json({
+                ok: false,
+                message:
+                    "اسم المستخدم وكلمة المرور مطلوبان."
+            });
+        }
+
+        if (
+            one(
+                "SELECT id FROM users WHERE username=?",
+                [username]
+            )
+        ) {
+
+            return res.status(409).json({
+                ok: false,
+                message:
+                    "اسم المستخدم موجود مسبقاً."
+            });
+        }
+
+        run(
+            `INSERT INTO users
+             (
+                username,
+                name,
+                password_hash,
+                role,
+                is_admin,
+                status,
+                device_serial,
+                created_at,
+                updated_at
+             )
+             VALUES(?,?,?,?,?,?,?,?,?)`,
+            [
+                username,
+                name,
+                hashPassword(password),
+                "admin",
+                1,
+                "active",
+                "",
+                now(),
+                now()
+            ]
+        );
+
+        saveDatabase();
+
+        audit(
+            req.user.id,
+            "create_supervisor",
+            username
+        );
+
+        res.json({
+            ok: true,
+            message:
+                "تم إنشاء المشرف بنجاح."
+        });
+    }
+);
+
+
+
+/* =========================================================
+   صلاحيات المشرف الحالي
+   هذا المسار يسمح للمشرف بقراءة صلاحياته فقط.
+   مدير النظام يمتلك جميع الصلاحيات.
+========================================================= */
+
+app.get(
+    "/api/admin/my-permissions",
+    requireAuth,
+    (req, res) => {
+
+        if (!req.user) {
+            return res.status(401).json({
+                ok: false,
+                message: "غير مصادق."
+            });
+        }
+
+        const userId =
+            Number(req.user.id);
+
+        const user =
+            one(
+                `SELECT id, username, name, role, is_admin, status
+                 FROM users
+                 WHERE id=?`,
+                [userId]
+            );
+
+        if (!user) {
+            return res.status(404).json({
+                ok: false,
+                message: "المستخدم غير موجود."
+            });
+        }
+
+        /*
+         * مدير النظام يمتلك جميع الصلاحيات.
+         */
+        if (user.role === "system_manager") {
+
+            const permissions =
+                ADMIN_PERMISSIONS.map(
+                    permission => ({
+                        permission,
+                        allowed: 1
+                    })
+                );
+
+            return res.json({
+                ok: true,
+                user,
+                permissions
+            });
+        }
+
+        /*
+         * المشرف العادي فقط.
+         */
+        if (
+            user.role !== "admin" ||
+            Number(user.is_admin) !== 1
+        ) {
+            return res.status(403).json({
+                ok: false,
+                message:
+                    "هذا المسار متاح للمشرفين فقط."
+            });
+        }
+
+        ensureUserPermissions(userId);
+
+        const permissions =
+            all(
+                `SELECT permission_key AS permission, allowed
+                 FROM user_permissions
+                 WHERE user_id=?
+                 ORDER BY permission_key`,
+                [userId]
+            );
+
+        res.json({
+            ok: true,
+            user,
+            permissions
+        });
+    }
+);
+
+/* =========================================================
+   صلاحيات المشرفين
+========================================================= */
+
+app.get(
+    "/api/system-manager/supervisors/:id/permissions",
+    requireAuth,
+    requireSystemManager,
+    (req, res) => {
+
+        const userId =
+            Number(req.params.id);
+
+        const user =
+            one(
+                `SELECT id, username, name, role, is_admin, status
+                 FROM users
+                 WHERE id=?`,
+                [userId]
+            );
+
+        if (!user) {
+            return res.status(404).json({
+                ok: false,
+                message: "المشرف غير موجود."
+            });
+        }
+
+        if (
+            user.role !== "admin" ||
+            Number(user.is_admin) !== 1
+        ) {
+            return res.status(400).json({
+                ok: false,
+                message: "الحساب المحدد ليس مشرفاً."
+            });
+        }
+
+        ensureUserPermissions(userId);
+
+        const permissions =
+            all(
+                `SELECT permission_key AS permission, allowed
+                 FROM user_permissions
+                 WHERE user_id=?
+                 ORDER BY permission_key`,
+                [userId]
+            );
+
+        res.json({
+            ok: true,
+            user,
+            permissions
+        });
+    }
+);
+
+app.put(
+    "/api/system-manager/supervisors/:id/permissions",
+    requireAuth,
+    requireSystemManager,
+    (req, res) => {
+
+        const userId =
+            Number(req.params.id);
+
+        const user =
+            one(
+                `SELECT id, username, name, role, is_admin
+                 FROM users
+                 WHERE id=?`,
+                [userId]
+            );
+
+        if (!user) {
+            return res.status(404).json({
+                ok: false,
+                message: "المشرف غير موجود."
+            });
+        }
+
+        if (
+            user.role !== "admin" ||
+            Number(user.is_admin) !== 1
+        ) {
+            return res.status(400).json({
+                ok: false,
+                message: "يمكن تعديل صلاحيات المشرفين فقط."
+            });
+        }
+
+        const incoming =
+            Array.isArray(req.body?.permissions)
+                ? req.body.permissions
+                : [];
+
+        const allowedNames = new Set(
+            ADMIN_PERMISSIONS
+        );
+
+        for (const item of incoming) {
+
+            const permission =
+                String(
+                    item?.permission || ""
+                );
+
+            if (!allowedNames.has(permission)) {
+                continue;
+            }
+
+            const allowed =
+                item?.allowed ? 1 : 0;
+
+            run(
+                `INSERT INTO user_permissions
+                 (user_id, permission, allowed, updated_at, permission_key, created_at)
+                 VALUES(?,?,?, ?,?,?)
+                 ON CONFLICT(user_id, permission)
+                 DO UPDATE SET
+                    allowed=excluded.allowed,
+                    updated_at=excluded.updated_at,
+                    permission_key=excluded.permission_key,
+                    created_at=excluded.created_at`,
+                [
+                    userId,
+                    permission,
+                    allowed,
+                    now(),
+                    permission,
+                    now()
+                ]
+            );
+        }
+
+        ensureUserPermissions(userId);
+
+        saveDatabase();
+
+        audit(
+            req.user.id,
+            "update_supervisor_permissions",
+            String(userId)
+        );
+
+        res.json({
+            ok: true,
+            message:
+                "تم حفظ صلاحيات المشرف بنجاح."
+        });
+    }
+);
+
+/* حذف مشرف */
+
+app.delete(
+    "/api/system-manager/supervisors/:id",
+    requireAuth,
+    requireSystemManager,
+    (req, res) => {
+
+        const id =
+            Number(req.params.id);
+
+        if (
+            !Number.isInteger(id) ||
+            id <= 0
+        ) {
+
+            return res.status(400).json({
+                ok: false,
+                message:
+                    "معرف المستخدم غير صحيح."
+            });
+        }
+
+        if (id === Number(req.user.id)) {
+
+            return res.status(403).json({
+                ok: false,
+                message:
+                    "لا يمكن لمدير النظام حذف حسابه."
+            });
+        }
+
+        const target =
+            one(
+                `SELECT
+                    id,
+                    username,
+                    name,
+                    role,
+                    is_admin,
+                    status
+                 FROM users
+                 WHERE id=?`,
+                [id]
+            );
+
+        if (!target) {
+
+            return res.status(404).json({
+                ok: false,
+                message:
+                    "المستخدم غير موجود."
+            });
+        }
+
+        if (target.role === "system_manager") {
+
+            return res.status(403).json({
+                ok: false,
+                message:
+                    "لا يمكن حذف مدير النظام."
+            });
+        }
+
+        if (
+            target.role !== "admin" ||
+            Number(target.is_admin) !== 1
+        ) {
+
+            return res.status(400).json({
+                ok: false,
+                message:
+                    "هذا المسار مخصص لحذف المشرفين فقط."
+            });
+        }
+
+        run(
+            "DELETE FROM users WHERE id=?",
+            [id]
+        );
+
+        saveDatabase();
+
+        audit(
+            req.user.id,
+            "delete_supervisor",
+            String(target.username)
+        );
+
+        res.json({
+            ok: true,
+            message:
+                "تم حذف المشرف بنجاح."
         });
     }
 );

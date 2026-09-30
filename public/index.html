@@ -1992,6 +1992,249 @@ form#sendForm.composer > button[type="submit"] {
             <button id="networkRestartBtn" class="primary-btn"><i class="fa-solid fa-rotate"></i> إعادة تشغيل النظام</button>
           </div>
 
+          <div id="systemManagerPanel"
+               class="hidden"
+               style="
+                 margin-top:15px;
+                 padding:10px;
+                 background:rgba(0,191,255,.05);
+                 border:1px solid rgba(0,191,255,.25);
+                 border-radius:8px;
+               ">
+
+            <h4 style="
+              color:var(--accent-blue);
+              margin-bottom:10px;
+            ">
+              <i class="fa-solid fa-user-tie"></i>
+              لوحة مدير النظام
+            </h4>
+
+            <div class="notice blue" style="margin-bottom:10px">
+              هذه اللوحة متاحة لمدير النظام فقط.
+              مدير النظام يمتلك جميع صلاحيات المشرف،
+              بالإضافة إلى إدارة حسابات المشرفين.
+            </div>
+
+            <div class="admin-section">
+              <div class="admin-title">
+                صلاحيات مدير النظام
+              </div>
+
+              <div
+                style="
+                  display:grid;
+                  grid-template-columns:repeat(2,minmax(0,1fr));
+                  gap:7px;
+                  margin-top:8px;
+                "
+              >
+                <div class="notice blue">
+                  <i class="fa-solid fa-shield-halved"></i>
+                  جميع صلاحيات المشرف
+                </div>
+
+                <div class="notice blue">
+                  <i class="fa-solid fa-user-plus"></i>
+                  إضافة مشرفين
+                </div>
+
+                <div class="notice blue">
+                  <i class="fa-solid fa-user-minus"></i>
+                  حذف المشرفين
+                </div>
+
+                <div class="notice blue">
+                  <i class="fa-solid fa-list-check"></i>
+                  إدارة النظام
+                </div>
+              </div>
+            </div>
+
+            <!-- =====================================================
+                 القائمة الثانية - إدارة صلاحيات المشرفين
+            ====================================================== -->
+
+            <div
+              class="admin-section"
+              id="systemManagerPermissionsSection"
+            >
+
+              <div class="admin-title">
+                <i class="fa-solid fa-user-lock"></i>
+                إدارة صلاحيات المشرفين
+              </div>
+
+              <div
+                class="notice blue"
+                style="margin-top:10px"
+              >
+                اختر المشرف ثم حدد الأوامر التي يسمح له بتنفيذها.
+                التغييرات لا تصبح فعالة إلا بعد الضغط على حفظ الصلاحيات.
+              </div>
+
+              <div class="input-group">
+                <label for="systemManagerPermissionSupervisor">
+                  اختيار المشرف
+                </label>
+
+                <select
+                  id="systemManagerPermissionSupervisor"
+                  style="
+                    width:100%;
+                    padding:9px;
+                    background:rgba(255,255,255,.03);
+                    border:1px solid var(--border-color);
+                    color:#fff;
+                    border-radius:6px;
+                  "
+                >
+                  <option value="">
+                    اختر مشرفاً
+                  </option>
+                </select>
+              </div>
+
+              <div
+                id="systemManagerPermissionsList"
+                class="system-list"
+                style="margin-top:12px"
+              >
+                <div class="notice blue">
+                  اختر مشرفاً لعرض صلاحياته.
+                </div>
+              </div>
+
+              <div
+                style="
+                  display:flex;
+                  gap:8px;
+                  margin-top:12px;
+                  flex-wrap:wrap;
+                "
+              >
+
+                <button
+                  id="systemManagerSavePermissionsBtn"
+                  class="primary-btn"
+                  type="button"
+                >
+                  <i class="fa-solid fa-floppy-disk"></i>
+                  حفظ الصلاحيات
+                </button>
+
+                <button
+                  id="systemManagerBackPermissionsBtn"
+                  class="secondary"
+                  type="button"
+                >
+                  <i class="fa-solid fa-arrow-right"></i>
+                  عودة
+                </button>
+
+              </div>
+
+            </div>
+
+
+            <div class="admin-section">
+              <div class="admin-title">
+                إضافة مشرف جديد
+              </div>
+
+              <div class="input-group">
+                <label for="systemManagerSupervisorUsername">
+                  اسم المستخدم
+                </label>
+
+                <input
+                  id="systemManagerSupervisorUsername"
+                  type="text"
+                  autocomplete="off"
+                  style="
+                    width:100%;
+                    padding:8px;
+                    background:rgba(255,255,255,.03);
+                    border:1px solid var(--border-color);
+                    color:#fff;
+                    border-radius:6px;
+                  "
+                >
+              </div>
+
+              <div class="input-group">
+                <label for="systemManagerSupervisorName">
+                  اسم المشرف
+                </label>
+
+                <input
+                  id="systemManagerSupervisorName"
+                  type="text"
+                  autocomplete="off"
+                  style="
+                    width:100%;
+                    padding:8px;
+                    background:rgba(255,255,255,.03);
+                    border:1px solid var(--border-color);
+                    color:#fff;
+                    border-radius:6px;
+                  "
+                >
+              </div>
+
+              <div class="input-group">
+                <label for="systemManagerSupervisorPassword">
+                  كلمة المرور
+                </label>
+
+                <input
+                  id="systemManagerSupervisorPassword"
+                  type="password"
+                  autocomplete="new-password"
+                  style="
+                    width:100%;
+                    padding:8px;
+                    background:rgba(255,255,255,.03);
+                    border:1px solid var(--border-color);
+                    color:#fff;
+                    border-radius:6px;
+                  "
+                >
+              </div>
+
+              <button
+                id="systemManagerAddSupervisorBtn"
+                class="primary-btn"
+                type="button"
+              >
+                <i class="fa-solid fa-user-plus"></i>
+                إضافة مشرف
+              </button>
+            </div>
+
+            <div class="admin-section" style="margin-top:12px">
+              <div class="admin-title">
+                المشرفون الحاليون
+              </div>
+
+              <div
+                id="systemManagerSupervisorsList"
+                class="system-list"
+              >
+                <div class="notice blue">
+                  لم يتم تحميل قائمة المشرفين بعد.
+                </div>
+              </div>
+            </div>
+
+            <div
+              id="systemManagerStatus"
+              class="notice blue hidden"
+              style="margin-top:10px"
+            ></div>
+
+          </div>
+
           <div id="adminStatus" class="notice blue hidden"></div>
         </div>
       </div>

@@ -16,6 +16,15 @@
 
   let token = localStorage.getItem("sm_token") || "";
   let me = null;
+
+  // قائمة المستخدمين الحالية المستخدمة في البحث
+  let currentUsersList = [];
+
+  /*
+   * حماية من تعارض تسجيل الدخول مع restoreSession.
+   * كل عملية مصادقة جديدة تحصل على رقم إصدار جديد.
+   */
+  let authGeneration = 0;
   let selectedUser = null;
   let selectedGroup = null;
   let selectedAdminUser = null;
@@ -47,19 +56,11 @@
     }
 
     try {
-      messengerSocket = io();
-
-      messengerSocket.on(
-        "connect",
-        () => {
-          messengerSocket.emit(
-            "authenticate",
-            {
-              user_id: Number(me.id)
-            }
-          );
+      messengerSocket = io({
+        auth: {
+          token: token
         }
-      );
+      });
 
       messengerSocket.on(
         "authenticated",
@@ -648,9 +649,192 @@
       (
         me.is_admin === 1 ||
         me.is_admin === true ||
-        me.role === "admin"
+        me.role === "admin" ||
+        me.role === "system_manager"
       )
     );
+  }
+
+  function isSystemManager() {
+    return !!(
+      me &&
+      me.role === "system_manager"
+    );
+  }
+
+
+  /*
+   * صلاحيات أزرار المشرف
+   *
+   * مدير النظام:
+   *   يمتلك جميع الصلاحيات.
+   *
+   * المشرف:
+   *   يتم تحميل صلاحياته من قاعدة البيانات.
+   *   allowed = 1  -> الزر ظاهر
+   *   allowed = 0  -> الزر مخفي
+   */
+  const ADMIN_PERMISSION_BUTTONS = {
+    add_user: ["addUserBtn"],
+    block_user: ["blockUserBtn"],
+    freeze_user: ["freezeUserBtn"],
+    release_user: ["releaseUserBtn"],
+    app_lock: ["appLockBtn"],
+    clear_chat: ["clearChatBtn"],
+    backup: ["backupBtn"],
+    locations: ["locationsBtn"],
+    warnings: ["warningsBtn"],
+    broadcast: ["broadcastBtn"],
+    manage_users: ["manageUsersBtn"],
+    user_reports: ["userReportsBtn"],
+    credentials_report: ["credentialsReportBtn"],
+    channels: ["channelsBtn"],
+    audit: ["auditBtn"],
+    update_database: ["updateDatabaseBtn"],
+    alert_mode: ["alertModeBtn"],
+    network_off: ["networkOffBtn"],
+    network_restart: ["networkRestartBtn"]
+  };
+
+  let currentAdminPermissions = {};
+
+  function applyAdminPermissionVisibility() {
+
+    /*
+     * إذا لم يكن المستخدم مشرفاً فلا نتدخل
+     * في بقية الواجهة.
+     */
+    if (!isAdmin()) {
+      return;
+    }
+
+    /*
+     * مدير النظام لديه كل الصلاحيات.
+     */
+    if (isSystemManager()) {
+
+      Object.values(
+        ADMIN_PERMISSION_BUTTONS
+      ).flat().forEach(function(id) {
+
+        const button = $(id);
+
+        if (button) {
+          button.classList.remove("hidden");
+        }
+
+      });
+
+      return;
+    }
+
+    /*
+     * المشرف العادي:
+     * نعرض فقط الصلاحيات التي قيمتها 1.
+     */
+    Object.entries(
+      ADMIN_PERMISSION_BUTTONS
+    ).forEach(function([permission, ids]) {
+
+      const allowed =
+        currentAdminPermissions[permission] === true;
+
+      ids.forEach(function(id) {
+
+        const button = $(id);
+
+        if (!button) {
+          return;
+        }
+
+        button.classList.toggle(
+          "hidden",
+          !allowed
+        );
+
+      });
+
+    });
+  }
+
+  async function loadCurrentAdminPermissions() {
+
+    /*
+     * مدير النظام لا يحتاج إلى استدعاء API.
+     */
+    if (!isAdmin()) {
+      currentAdminPermissions = {};
+      return;
+    }
+
+    if (isSystemManager()) {
+
+      currentAdminPermissions = {};
+
+      Object.keys(
+        ADMIN_PERMISSION_BUTTONS
+      ).forEach(function(permission) {
+        currentAdminPermissions[permission] = true;
+      });
+
+      applyAdminPermissionVisibility();
+      return;
+    }
+
+    /*
+     * نبدأ بحالة مغلقة حتى لا تظهر الأزرار
+     * أثناء انتظار نتيجة السيرفر.
+     */
+    currentAdminPermissions = {};
+
+    applyAdminPermissionVisibility();
+
+    try {
+
+      const data =
+        await api(
+          "/api/admin/my-permissions"
+        );
+
+      const list =
+        Array.isArray(data?.permissions)
+          ? data.permissions
+          : [];
+
+      list.forEach(function(item) {
+
+        const permission =
+          String(
+            item?.permission ||
+            item?.permission_key ||
+            ""
+          );
+
+        if (!permission) {
+          return;
+        }
+
+        currentAdminPermissions[permission] =
+          Number(item?.allowed) === 1;
+
+      });
+
+    } catch (error) {
+
+      console.error(
+        "loadCurrentAdminPermissions:",
+        error
+      );
+
+      /*
+       * في حالة فشل تحميل الصلاحيات:
+       * لا نعطي المشرف صلاحيات إضافية من الواجهة.
+       */
+      currentAdminPermissions = {};
+
+    }
+
+    applyAdminPermissionVisibility();
   }
 
   function ensureAdmin() {
@@ -687,6 +871,29 @@
     $("appPage")?.classList.remove(
       "hidden"
     );
+
+    /*
+     * عرض اسم المستخدم وهويته فوراً.
+     * مدير النظام / مشرف / مستخدم
+     */
+    if (me) {
+      const roleLabel =
+        isSystemManager()
+          ? "مدير النظام"
+          : isAdmin()
+            ? "مشرف"
+            : "مستخدم";
+
+      const displayName =
+        me.name ||
+        me.username ||
+        "مستخدم";
+
+      setText(
+        "identity",
+        `${roleLabel} • ${displayName}`
+      );
+    }
   }
 
   function adminStatus(
@@ -946,6 +1153,12 @@
       event.preventDefault();
     }
 
+    /*
+     * تسجيل دخول جديد يلغي أي عملية restoreSession
+     * كانت بدأت بجلسة أقدم.
+     */
+    const loginGeneration = ++authGeneration;
+
     const errorBox =
       $("loginError");
 
@@ -1014,6 +1227,18 @@
           })
         });
 
+      console.log(
+        "[AUTH_DEBUG] LOGIN_RESPONSE",
+        {
+          ok: data?.ok,
+          user: data?.user,
+          username: data?.user?.username,
+          name: data?.user?.name,
+          role: data?.user?.role,
+          user_id: data?.user?.id
+        }
+      );
+
       if (
         !data.ok ||
         !data.token
@@ -1024,8 +1249,24 @@
         );
       }
 
+      /*
+       * تأكد أن هذه النتيجة تخص آخر عملية تسجيل دخول.
+       * إذا سبقتها عملية مصادقة أخرى فلا نسمح لها بتغيير الهوية.
+       */
+      if (loginGeneration !== authGeneration) {
+        console.warn(
+          "[AUTH] تم تجاهل نتيجة تسجيل دخول قديمة."
+        );
+        return false;
+      }
+
       token = data.token;
       me = data.user || {};
+
+      /*
+       * تحميل صلاحيات المشرف قبل تشغيل بقية التطبيق.
+       */
+      await loadCurrentAdminPermissions();
 
       localStorage.setItem(
         "sm_token",
@@ -1070,6 +1311,8 @@
   window.getCurrentUser =
     getCurrentUser;
   window.isAdmin = isAdmin;
+  window.isSystemManager =
+    isSystemManager;
   window.ensureAdmin =
     ensureAdmin;
   window.adminStatus =
@@ -1254,6 +1497,7 @@
 
   async function loadUsers() {
     try {
+
       const data =
         await api("/api/users");
 
@@ -1277,113 +1521,299 @@
           users.length;
       }
 
-      users.forEach(user => {
-        const div =
-          document.createElement(
-            "div"
-          );
+      /*
+       * صندوق البحث
+       */
+      const searchBox =
+        document.createElement("div");
 
-        div.className =
-          "user-item";
+      searchBox.style.cssText = `
+        position:sticky;
+        top:0;
+        z-index:10;
+        padding:8px 0 10px 0;
+        background:var(--bg-primary,#080d09);
+      `;
 
-        const online =
-          onlineUsers.has(
-            Number(user.id)
-          ) ||
-          user.online === true;
+      searchBox.innerHTML = `
+        <div style="
+          position:relative;
+          width:100%;
+        ">
 
-        if (online) {
-          onlineUsers.add(
-            Number(user.id)
-          );
-        } else {
-          onlineUsers.delete(
-            Number(user.id)
-          );
-        }
-
-        const label =
-          userDisplayLabel(user);
-
-        div.innerHTML = `
-          <b
-            class="user-name-display"
+          <i
+            class="fa-solid fa-magnifying-glass"
             style="
-              display:block;
-              font-family:'Cairo',sans-serif;
-              font-weight:700;
-              font-size:15px;
-              line-height:1.7;
-              letter-spacing:0;
-              color:var(--text-primary,#f8fafc);
+              position:absolute;
+              right:12px;
+              top:50%;
+              transform:translateY(-50%);
+              color:var(--accent-green,#00ff80);
+              pointer-events:none;
             "
-          >${escapeHtml(
-            label
-          )}</b>
+          ></i>
 
-          <div
-            class="online"
+          <input
+            id="usersSearchInput"
+            type="search"
+            autocomplete="off"
+            placeholder="بحث عن اسم أو حساب..."
+            aria-label="بحث عن مستخدم"
             style="
-              display:flex;
-              align-items:center;
-              gap:6px;
-              margin-top:3px;
+              width:100%;
+              box-sizing:border-box;
+              min-height:44px;
+              padding:9px 40px 9px 12px;
+              border-radius:10px;
+              border:1px solid rgba(0,255,128,.25);
+              background:rgba(0,0,0,.28);
+              color:var(--text-primary,#f8fafc);
               font-family:'Cairo',sans-serif;
-              font-size:12px;
-              font-weight:600;
-              color:${online ? '#facc15' : '#ef4444'};
+              font-size:14px;
+              outline:none;
             "
           >
-            <span
-              aria-hidden="true"
+
+        </div>
+
+        <div
+          id="usersSearchResultCount"
+          style="
+            margin-top:5px;
+            padding:0 4px;
+            font-family:'Cairo',sans-serif;
+            font-size:11px;
+            color:rgba(255,255,255,.55);
+          "
+        ></div>
+      `;
+
+      list.appendChild(searchBox);
+
+      /*
+       * حاوية نتائج البحث
+       */
+      const usersContainer =
+        document.createElement("div");
+
+      usersContainer.id =
+        "usersSearchResults";
+
+      list.appendChild(usersContainer);
+
+      /*
+       * رسم المستخدمين
+       */
+      function renderUsers(searchText = "") {
+
+        usersContainer.innerHTML = "";
+
+        const query =
+          String(searchText || "")
+            .trim()
+            .toLowerCase();
+
+        const filteredUsers =
+          query
+            ? users.filter(user => {
+
+                const name =
+                  String(
+                    user.name ||
+                    ""
+                  ).toLowerCase();
+
+                const username =
+                  String(
+                    user.username ||
+                    ""
+                  ).toLowerCase();
+
+                const label =
+                  String(
+                    userDisplayLabel(user) ||
+                    ""
+                  ).toLowerCase();
+
+                return (
+                  name.includes(query) ||
+                  username.includes(query) ||
+                  label.includes(query)
+                );
+              })
+            : users;
+
+        const resultCount =
+          $("usersSearchResultCount");
+
+        if (resultCount) {
+          resultCount.textContent =
+            query
+              ? `نتائج البحث: ${filteredUsers.length}`
+              : `إجمالي المستخدمين: ${users.length}`;
+        }
+
+        if (!filteredUsers.length) {
+
+          const empty =
+            document.createElement("div");
+
+          empty.style.cssText = `
+            padding:18px 8px;
+            text-align:center;
+            color:rgba(255,255,255,.55);
+            font-family:'Cairo',sans-serif;
+            font-size:13px;
+          `;
+
+          empty.innerHTML = `
+            <i class="fa-solid fa-user-slash"></i>
+            <div style="margin-top:6px">
+              لا يوجد مستخدم مطابق للبحث
+            </div>
+          `;
+
+          usersContainer.appendChild(empty);
+
+          return;
+        }
+
+        filteredUsers.forEach(user => {
+
+          const div =
+            document.createElement(
+              "div"
+            );
+
+          div.className =
+            "user-item";
+
+          const online =
+            onlineUsers.has(
+              Number(user.id)
+            ) ||
+            user.online === true;
+
+          if (online) {
+            onlineUsers.add(
+              Number(user.id)
+            );
+          } else {
+            onlineUsers.delete(
+              Number(user.id)
+            );
+          }
+
+          const label =
+            userDisplayLabel(user);
+
+          div.innerHTML = `
+            <b
+              class="user-name-display"
               style="
-                width:8px;
-                height:8px;
-                min-width:8px;
-                border-radius:50%;
-                display:inline-block;
-                background:${online ? '#facc15' : '#ef4444'};
-                box-shadow:0 0 7px ${online ? 'rgba(250,204,21,.75)' : 'rgba(239,68,68,.65)'};
+                display:block;
+                font-family:'Cairo',sans-serif;
+                font-weight:700;
+                font-size:15px;
+                line-height:1.7;
+                letter-spacing:0;
+                color:var(--text-primary,#f8fafc);
               "
-            ></span>
+            >${escapeHtml(
+              label
+            )}</b>
 
-            <span>
-              ${online
+            <div
+              class="online"
+              style="
+                display:flex;
+                align-items:center;
+                gap:6px;
+                margin-top:3px;
+                font-family:'Cairo',sans-serif;
+                font-size:12px;
+                font-weight:600;
+                color:${online ? '#facc15' : '#ef4444'};
+              "
+            >
+              <span
+                aria-hidden="true"
+                style="
+                  width:8px;
+                  height:8px;
+                  min-width:8px;
+                  border-radius:50%;
+                  display:inline-block;
+                  background:${online ? '#facc15' : '#ef4444'};
+                  box-shadow:0 0 7px ${online ? 'rgba(250,204,21,.75)' : 'rgba(239,68,68,.65)'};
+                "
+              ></span>
+
+              <span>
+                ${online
+                  ? "متصل الآن"
+                  : "غير متصل"}
+              </span>
+            </div>
+          `;
+
+          div.onclick = async () => {
+
+            selectedUser =
+              user;
+
+            selectedGroup =
+              null;
+
+            setText(
+              "chatTitle",
+              label
+            );
+
+            setText(
+              "chatStatus",
+              online
                 ? "متصل الآن"
-                : "غير متصل"}
-            </span>
-          </div>
-        `;
+                : "متصل بالخادم"
+            );
 
-        div.onclick = async () => {
-          selectedUser =
-            user;
+            $("sidebar")
+              ?.classList
+              .remove("open");
 
-          selectedGroup = null;
+            await loadMessagesFor(
+              user.id
+            );
+          };
 
-          setText(
-            "chatTitle",
-            label
+          usersContainer.appendChild(
+            div
           );
 
-          setText(
-            "chatStatus",
-            online
-              ? "متصل الآن"
-              : "متصل بالخادم"
-          );
+        });
+      }
 
-          $("sidebar")
-            ?.classList
-            .remove("open");
+      /*
+       * البحث الفوري
+       */
+      const searchInput =
+        $("usersSearchInput");
 
-          await loadMessagesFor(
-            user.id
-          );
-        };
+      if (searchInput) {
 
-        list.appendChild(div);
-      });
+        searchInput.addEventListener(
+          "input",
+          function() {
+
+            renderUsers(
+              this.value
+            );
+
+          }
+        );
+      }
+
+      renderUsers();
 
     } catch (error) {
 
@@ -1396,6 +1826,7 @@
         $("usersList");
 
       if (list) {
+
         list.innerHTML =
           `
           <div class="notice red">
@@ -1404,6 +1835,7 @@
             )}
           </div>
           `;
+
       }
     }
   }
@@ -2371,6 +2803,15 @@
     bootRunning = true;
 
     /*
+     * نحفظ هوية المستخدم التي بدأ بها boot.
+     * إذا تغيرت الهوية أثناء تنفيذ boot (مثلاً من
+     * جلسة قديمة إلى تسجيل دخول جديد)، سيعاد تشغيل
+     * boot بعد انتهاء العملية الحالية حتى لا تبقى
+     * الواجهة على المستخدم القديم.
+     */
+    const bootUserId = Number(me?.id || 0);
+
+    /*
      * الواجهة يجب أن تصبح قابلة للاستخدام فوراً.
      * أي طلب API بطيء أو فاشل لا يمنع بقية التطبيق.
      */
@@ -2393,17 +2834,23 @@
     };
 
     const identity =
-      isAdmin()
-        ? `المشرف • ${
+      isSystemManager()
+        ? `مدير النظام • ${
             me.name ||
             me.username ||
             ""
           }`
-        : `مستخدم • ${
-            me.name ||
-            me.username ||
-            ""
-          }`;
+        : isAdmin()
+          ? `المشرف • ${
+              me.name ||
+              me.username ||
+              ""
+            }`
+          : `مستخدم • ${
+              me.name ||
+              me.username ||
+              ""
+            }`;
 
     setText("identity", identity);
 
@@ -2424,6 +2871,24 @@
      * السماح للواجهة بالظهور والعمل أولاً.
      */
     showApp();
+
+    /*
+     * إدارة مدير النظام.
+     * تظهر فقط للحساب الذي يحمل role=system_manager.
+     * المشرف والمستخدم العادي لا تظهر لهما.
+     */
+    bindSystemManagerControls();
+
+    console.log(
+      "[SYSTEM_MANAGER_DEBUG]",
+      {
+        user: me,
+        role: me?.role,
+        isAdmin: isAdmin(),
+        isSystemManager: isSystemManager(),
+        panel: !!$("systemManagerPanel")
+      }
+    );
 
     /*
      * فحص الاتصال.
@@ -2487,9 +2952,39 @@
     console.log("[BOOT] COMPLETE");
 
     bootRunning = false;
+
+    /*
+     * إذا تغير المستخدم أثناء تشغيل boot، فلا نترك
+     * الواجهة على هوية المستخدم القديمة.
+     * بعد انتهاء boot الحالي نعيد البناء بالمستخدم الجديد.
+     */
+    if (
+      me &&
+      Number(me.id || 0) !== bootUserId
+    ) {
+      console.log(
+        "[BOOT] USER_CHANGED",
+        {
+          oldUserId: bootUserId,
+          newUserId: Number(me.id || 0),
+          username: me.username,
+          role: me.role
+        }
+      );
+
+      await boot();
+    }
   }
 
   async function restoreSession() {
+
+    /*
+     * حفظ إصدار المصادقة الحالي.
+     * إذا بدأ تسجيل دخول جديد أثناء انتظار /api/me،
+     * يتم تجاهل نتيجة الجلسة القديمة.
+     */
+    const restoreGeneration = authGeneration;
+    const restoreToken = token;
 
     /*
      * استعادة الجلسة بطريقة آمنة:
@@ -2508,6 +3003,20 @@
         method: "GET",
         cache: "no-store"
       });
+
+      /*
+       * لا تسمح لجلسة قديمة بالكتابة فوق هوية
+       * المستخدم الذي سجل دخوله الآن.
+       */
+      if (
+        restoreGeneration !== authGeneration ||
+        restoreToken !== token
+      ) {
+        console.warn(
+          "[AUTH] تم تجاهل restoreSession قديمة."
+        );
+        return;
+      }
 
       if (
         !data ||
@@ -2677,6 +3186,935 @@
             .remove("hidden");
         }
       };
+  }
+
+  /* =========================================================
+     مدير النظام - إدارة المشرفين
+  ========================================================= */
+
+  function systemManagerStatus(message, type = "blue") {
+
+    const box = $("systemManagerStatus");
+
+    if (!box) {
+      return;
+    }
+
+    box.className =
+      "notice " +
+      (
+        type === "green"
+          ? "green"
+          : type === "red"
+            ? "red"
+            : "blue"
+      );
+
+    box.textContent = message || "";
+
+    box.classList.remove("hidden");
+  }
+
+  function hideSystemManagerStatus() {
+
+    const box = $("systemManagerStatus");
+
+    if (!box) {
+      return;
+    }
+
+    box.textContent = "";
+    box.classList.add("hidden");
+  }
+
+  function updateSystemManagerPanelVisibility() {
+
+    const panel =
+      $("systemManagerPanel");
+
+    if (!panel) {
+      return;
+    }
+
+    if (isSystemManager()) {
+
+      panel.classList.remove("hidden");
+
+    } else {
+
+      panel.classList.add("hidden");
+
+    }
+  }
+
+  async function loadSystemManagerSupervisors() {
+
+    if (!isSystemManager()) {
+      return;
+    }
+
+    const list =
+      $("systemManagerSupervisorsList");
+
+    if (!list) {
+      return;
+    }
+
+    list.innerHTML = `
+      <div class="notice blue">
+        جاري تحميل المشرفين...
+      </div>
+    `;
+
+    try {
+
+      const data =
+        await api("/api/admin/users");
+
+      const users =
+        Array.isArray(data?.users)
+          ? data.users
+          : [];
+
+      const supervisors =
+        users.filter(function (user) {
+
+          return (
+            user &&
+            user.role === "admin" &&
+            Number(user.is_admin) === 1
+          );
+
+        });
+
+      if (!supervisors.length) {
+
+        list.innerHTML = `
+          <div class="notice blue">
+            لا يوجد مشرفون مسجلون حالياً.
+          </div>
+        `;
+
+        return;
+      }
+
+      let html = "";
+
+      supervisors.forEach(function (user) {
+
+        const userId =
+          Number(user.id);
+
+        const name =
+          escapeHtml(
+            user.name ||
+            user.username ||
+            ""
+          );
+
+        const username =
+          escapeHtml(
+            user.username ||
+            ""
+          );
+
+        const status =
+          escapeHtml(
+            user.status ||
+            "active"
+          );
+
+        html += `
+          <div
+            class="system-item"
+            style="
+              margin-bottom:8px;
+              padding:10px;
+              border:1px solid rgba(0,191,255,.18);
+              border-radius:7px;
+            "
+          >
+
+            <b>${name}</b>
+
+            <div style="
+              font-size:12px;
+              opacity:.85;
+              margin-top:4px;
+            ">
+              اسم المستخدم:
+              ${username}
+            </div>
+
+            <div style="
+              font-size:12px;
+              opacity:.85;
+              margin-top:3px;
+            ">
+              الحالة:
+              ${status}
+            </div>
+
+            <div style="
+              margin-top:8px;
+            ">
+
+              <button
+                type="button"
+                class="danger-btn"
+                data-system-manager-delete-supervisor="${userId}"
+              >
+                <i class="fa-solid fa-user-minus"></i>
+                حذف المشرف
+              </button>
+
+            </div>
+
+          </div>
+        `;
+      });
+
+      list.innerHTML = html;
+
+    } catch (error) {
+
+      console.error(
+        "loadSystemManagerSupervisors:",
+        error
+      );
+
+      list.innerHTML = `
+        <div class="notice red">
+          تعذر تحميل قائمة المشرفين.
+          ${escapeHtml(
+            error?.message || ""
+          )}
+        </div>
+      `;
+    }
+  }
+
+  async function createSupervisorFromSystemManager() {
+
+    if (!isSystemManager()) {
+
+      systemManagerStatus(
+        "هذه العملية متاحة لمدير النظام فقط.",
+        "red"
+      );
+
+      return;
+    }
+
+    const username =
+      String(
+        $("systemManagerSupervisorUsername")?.value ||
+        ""
+      ).trim();
+
+    const name =
+      String(
+        $("systemManagerSupervisorName")?.value ||
+        ""
+      ).trim();
+
+    const password =
+      String(
+        $("systemManagerSupervisorPassword")?.value ||
+        ""
+      );
+
+    if (!username || !password) {
+
+      systemManagerStatus(
+        "اسم المستخدم وكلمة المرور مطلوبان.",
+        "red"
+      );
+
+      return;
+    }
+
+    const button =
+      $("systemManagerAddSupervisorBtn");
+
+    try {
+
+      if (button) {
+        button.disabled = true;
+      }
+
+      hideSystemManagerStatus();
+
+      const result =
+        await api(
+          "/api/system-manager/supervisors",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              username,
+              name,
+              password
+            })
+          }
+        );
+
+      systemManagerStatus(
+        result?.message ||
+        "تم إنشاء المشرف بنجاح.",
+        "green"
+      );
+
+      const usernameInput =
+        $("systemManagerSupervisorUsername");
+
+      const nameInput =
+        $("systemManagerSupervisorName");
+
+      const passwordInput =
+        $("systemManagerSupervisorPassword");
+
+      if (usernameInput) {
+        usernameInput.value = "";
+      }
+
+      if (nameInput) {
+        nameInput.value = "";
+      }
+
+      if (passwordInput) {
+        passwordInput.value = "";
+      }
+
+      await loadSystemManagerSupervisors();
+
+    } catch (error) {
+
+      console.error(
+        "createSupervisorFromSystemManager:",
+        error
+      );
+
+      systemManagerStatus(
+        error?.message ||
+        "تعذر إنشاء المشرف.",
+        "red"
+      );
+
+    } finally {
+
+      if (button) {
+        button.disabled = false;
+      }
+
+    }
+  }
+
+  async function deleteSupervisorFromSystemManager(id) {
+
+    if (!isSystemManager()) {
+
+      systemManagerStatus(
+        "هذه العملية متاحة لمدير النظام فقط.",
+        "red"
+      );
+
+      return;
+    }
+
+    const supervisorId =
+      Number(id);
+
+    if (
+      !Number.isInteger(supervisorId) ||
+      supervisorId <= 0
+    ) {
+
+      systemManagerStatus(
+        "معرف المشرف غير صحيح.",
+        "red"
+      );
+
+      return;
+    }
+
+    const confirmed =
+      confirm(
+        "هل أنت متأكد من حذف حساب هذا المشرف؟"
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+
+      const result =
+        await api(
+          "/api/system-manager/supervisors/" +
+          encodeURIComponent(
+            String(supervisorId)
+          ),
+          {
+            method: "DELETE"
+          }
+        );
+
+      systemManagerStatus(
+        result?.message ||
+        "تم حذف المشرف بنجاح.",
+        "green"
+      );
+
+      await loadSystemManagerSupervisors();
+
+    } catch (error) {
+
+      console.error(
+        "deleteSupervisorFromSystemManager:",
+        error
+      );
+
+      systemManagerStatus(
+        error?.message ||
+        "تعذر حذف المشرف.",
+        "red"
+      );
+
+    }
+  }
+
+
+  const SYSTEM_MANAGER_PERMISSIONS = [
+    ["add_user", "إضافة مستخدم"],
+    ["block_user", "حظر مستخدم"],
+    ["freeze_user", "تجميد مستخدم"],
+    ["release_user", "إطلاق وفك التجميد"],
+    ["app_lock", "قفل التطبيق"],
+    ["clear_chat", "مسح المحادثة"],
+    ["backup", "النسخة الاحتياطية"],
+    ["locations", "معرفة المواقع"],
+    ["warnings", "استعراض تحذيرات النظام"],
+    ["broadcast", "رسالة للجميع"],
+    ["manage_users", "إدارة الحسابات"],
+    ["user_reports", "تقرير الوحدات والفرق"],
+    ["credentials_report", "تقرير الحسابات"],
+    ["channels", "القنوات"],
+    ["audit", "سجل النظام"],
+    ["update_database", "تحديث قاعدة البيانات"],
+    ["alert_mode", "حالة التأهب"],
+    ["network_off", "إطفاء الشبكة"],
+    ["network_restart", "إعادة تشغيل النظام"]
+  ];
+
+  function renderSystemManagerPermissions(
+    permissions
+  ) {
+
+    const list =
+      $("systemManagerPermissionsList");
+
+    if (!list) {
+      return;
+    }
+
+    const map = {};
+
+    (Array.isArray(permissions)
+      ? permissions
+      : []
+    ).forEach(function(item) {
+
+      map[
+        String(item.permission || "")
+      ] = Number(item.allowed) === 1;
+
+    });
+
+    let html = "";
+
+    SYSTEM_MANAGER_PERMISSIONS.forEach(
+      function(item) {
+
+        const permission = item[0];
+        const label = item[1];
+
+        const checked =
+          map[permission] !== false;
+
+        html += `
+          <label
+            style="
+              display:flex;
+              align-items:center;
+              justify-content:space-between;
+              gap:10px;
+              padding:10px;
+              margin-bottom:7px;
+              border:1px solid rgba(0,191,255,.18);
+              border-radius:7px;
+              cursor:pointer;
+            "
+          >
+
+            <span>
+              ${escapeHtml(label)}
+            </span>
+
+            <span
+              style="
+                display:flex;
+                align-items:center;
+                gap:7px;
+                direction:ltr;
+              "
+            >
+
+              <input
+                type="checkbox"
+                class="system-manager-permission"
+                data-permission="${escapeHtml(permission)}"
+                ${checked ? "checked" : ""}
+              >
+
+              <b
+                class="system-manager-permission-value"
+                data-value-for="${escapeHtml(permission)}"
+              >
+                ${checked ? "true" : "false"}
+              </b>
+
+            </span>
+
+          </label>
+        `;
+      }
+    );
+
+    list.innerHTML = html;
+
+    list
+      .querySelectorAll(
+        ".system-manager-permission"
+      )
+      .forEach(function(checkbox) {
+
+        checkbox.addEventListener(
+          "change",
+          function() {
+
+            const value =
+              checkbox.checked;
+
+            const valueBox =
+              list.querySelector(
+                '[data-value-for="' +
+                CSS.escape(
+                  checkbox.dataset.permission
+                ) +
+                '"]'
+              );
+
+            if (valueBox) {
+              valueBox.textContent =
+                value ? "true" : "false";
+            }
+          }
+        );
+      });
+  }
+
+  async function loadSystemManagerPermissions() {
+
+    if (!isSystemManager()) {
+      return;
+    }
+
+    const select =
+      $("systemManagerPermissionSupervisor");
+
+    const list =
+      $("systemManagerPermissionsList");
+
+    if (!select || !list) {
+      return;
+    }
+
+    const supervisorId =
+      Number(select.value || 0);
+
+    if (!supervisorId) {
+
+      list.innerHTML = `
+        <div class="notice blue">
+          اختر مشرفاً لعرض صلاحياته.
+        </div>
+      `;
+
+      return;
+    }
+
+    list.innerHTML = `
+      <div class="notice blue">
+        جاري تحميل الصلاحيات...
+      </div>
+    `;
+
+    try {
+
+      const data =
+        await api(
+          "/api/system-manager/supervisors/" +
+          encodeURIComponent(
+            String(supervisorId)
+          ) +
+          "/permissions"
+        );
+
+      renderSystemManagerPermissions(
+        data?.permissions || []
+      );
+
+    } catch (error) {
+
+      console.error(
+        "loadSystemManagerPermissions:",
+        error
+      );
+
+      list.innerHTML = `
+        <div class="notice red">
+          تعذر تحميل الصلاحيات.
+          ${escapeHtml(
+            error?.message || ""
+          )}
+        </div>
+      `;
+    }
+  }
+
+  async function saveSystemManagerPermissions() {
+
+    if (!isSystemManager()) {
+
+      systemManagerStatus(
+        "هذه العملية متاحة لمدير النظام فقط.",
+        "red"
+      );
+
+      return;
+    }
+
+    const select =
+      $("systemManagerPermissionSupervisor");
+
+    const supervisorId =
+      Number(select?.value || 0);
+
+    if (!supervisorId) {
+
+      systemManagerStatus(
+        "اختر المشرف أولاً.",
+        "red"
+      );
+
+      return;
+    }
+
+    const list =
+      $("systemManagerPermissionsList");
+
+    if (!list) {
+      return;
+    }
+
+    const permissions = [];
+
+    list
+      .querySelectorAll(
+        ".system-manager-permission"
+      )
+      .forEach(function(checkbox) {
+
+        permissions.push({
+          permission:
+            checkbox.dataset.permission,
+
+          allowed:
+            checkbox.checked
+        });
+
+      });
+
+    const button =
+      $("systemManagerSavePermissionsBtn");
+
+    try {
+
+      if (button) {
+        button.disabled = true;
+      }
+
+      const result =
+        await api(
+          "/api/system-manager/supervisors/" +
+          encodeURIComponent(
+            String(supervisorId)
+          ) +
+          "/permissions",
+          {
+            method: "PUT",
+
+            body: JSON.stringify({
+              permissions
+            })
+          }
+        );
+
+      systemManagerStatus(
+        result?.message ||
+        "تم حفظ الصلاحيات بنجاح.",
+        "green"
+      );
+
+      await loadSystemManagerPermissions();
+
+    } catch (error) {
+
+      console.error(
+        "saveSystemManagerPermissions:",
+        error
+      );
+
+      systemManagerStatus(
+        error?.message ||
+        "تعذر حفظ الصلاحيات.",
+        "red"
+      );
+
+    } finally {
+
+      if (button) {
+        button.disabled = false;
+      }
+    }
+  }
+
+  function loadSystemManagerPermissionSupervisors() {
+
+    if (!isSystemManager()) {
+      return;
+    }
+
+    const select =
+      $("systemManagerPermissionSupervisor");
+
+    if (!select) {
+      return;
+    }
+
+    api("/api/admin/users")
+      .then(function(data) {
+
+        const users =
+          Array.isArray(data?.users)
+            ? data.users
+            : [];
+
+        const supervisors =
+          users.filter(function(user) {
+
+            return (
+              user &&
+              user.role === "admin" &&
+              Number(user.is_admin) === 1
+            );
+
+          });
+
+        const current =
+          select.value;
+
+        let html =
+          '<option value="">اختر مشرفاً</option>';
+
+        supervisors.forEach(
+          function(user) {
+
+            html += `
+              <option value="${Number(user.id)}">
+                ${escapeHtml(
+                  user.name ||
+                  user.username ||
+                  ""
+                )}
+                -
+                ${escapeHtml(
+                  user.username || ""
+                )}
+              </option>
+            `;
+
+          }
+        );
+
+        select.innerHTML = html;
+
+        if (
+          current &&
+          supervisors.some(
+            user =>
+              String(user.id) ===
+              String(current)
+          )
+        ) {
+          select.value = current;
+        }
+
+        loadSystemManagerPermissions();
+
+      })
+      .catch(function(error) {
+
+        console.error(
+          "loadSystemManagerPermissionSupervisors:",
+          error
+        );
+
+      });
+  }
+
+  function bindSystemManagerControls() {
+
+    updateSystemManagerPanelVisibility();
+
+    const permissionSelect =
+      $("systemManagerPermissionSupervisor");
+
+    if (
+      permissionSelect &&
+      !permissionSelect.dataset.permissionsReady
+    ) {
+
+      permissionSelect.dataset.permissionsReady =
+        "1";
+
+      permissionSelect.addEventListener(
+        "change",
+        loadSystemManagerPermissions
+      );
+    }
+
+    const savePermissionsButton =
+      $("systemManagerSavePermissionsBtn");
+
+    if (
+      savePermissionsButton &&
+      !savePermissionsButton.dataset.permissionsReady
+    ) {
+
+      savePermissionsButton.dataset.permissionsReady =
+        "1";
+
+      savePermissionsButton.addEventListener(
+        "click",
+        saveSystemManagerPermissions
+      );
+    }
+
+    const backPermissionsButton =
+      $("systemManagerBackPermissionsBtn");
+
+    if (
+      backPermissionsButton &&
+      !backPermissionsButton.dataset.permissionsReady
+    ) {
+
+      backPermissionsButton.dataset.permissionsReady =
+        "1";
+
+      backPermissionsButton.addEventListener(
+        "click",
+        function() {
+
+          const section =
+            $("systemManagerPermissionsSection");
+
+          if (section) {
+            section.classList.add("hidden");
+          }
+
+          const supervisorSection =
+            $("systemManagerSupervisorsList")
+              ?.closest(".admin-section");
+
+          if (supervisorSection) {
+            supervisorSection.scrollIntoView({
+              behavior: "smooth",
+              block: "start"
+            });
+          }
+        }
+      );
+    }
+
+    if (isSystemManager()) {
+      loadSystemManagerPermissionSupervisors();
+    }
+
+
+    const addButton =
+      $("systemManagerAddSupervisorBtn");
+
+    if (
+      addButton &&
+      !addButton.dataset.systemManagerReady
+    ) {
+
+      addButton.dataset.systemManagerReady =
+        "1";
+
+      addButton.addEventListener(
+        "click",
+        createSupervisorFromSystemManager
+      );
+    }
+
+    const list =
+      $("systemManagerSupervisorsList");
+
+    if (
+      list &&
+      !list.dataset.systemManagerReady
+    ) {
+
+      list.dataset.systemManagerReady =
+        "1";
+
+      list.addEventListener(
+        "click",
+        function (event) {
+
+          const button =
+            event.target.closest(
+              "[data-system-manager-delete-supervisor]"
+            );
+
+          if (!button) {
+            return;
+          }
+
+          deleteSupervisorFromSystemManager(
+            button.getAttribute(
+              "data-system-manager-delete-supervisor"
+            )
+          );
+        }
+      );
+    }
+
+    if (isSystemManager()) {
+      loadSystemManagerSupervisors();
+    }
   }
 
   async function manageUsers() {
@@ -4085,8 +5523,22 @@
       return;
     }
 
+    const button = $("updateDatabaseBtn");
+    const originalHtml = button?.innerHTML;
+
     try {
 
+      if (button) {
+        button.disabled = true;
+        button.innerHTML =
+          `<i class="fa-solid fa-spinner fa-spin"></i>
+           جارٍ تحديث قاعدة البيانات...`;
+      }
+
+      /*
+       * أولاً:
+       * حفظ قاعدة البيانات فعلياً على السيرفر.
+       */
       const result =
         await api(
           "/api/admin/database/update",
@@ -4097,19 +5549,72 @@
 
       adminStatus(
         result.message ||
-        "تم تحديث قاعدة البيانات.",
+        "تم تحديث وحفظ قاعدة البيانات.",
         "green"
       );
 
-      await refreshTeamStats();
+      /*
+       * تحديث بيانات الواجهة قبل إعادة تحميل التطبيق.
+       */
+      try {
+        await refreshTeamStats();
+      } catch (error) {
+        console.warn(
+          "[UPDATE] refreshTeamStats:",
+          error.message
+        );
+      }
+
+      try {
+        await loadUsers();
+      } catch (error) {
+        console.warn(
+          "[UPDATE] loadUsers:",
+          error.message
+        );
+      }
+
+      try {
+        await loadGroups();
+      } catch (error) {
+        console.warn(
+          "[UPDATE] loadGroups:",
+          error.message
+        );
+      }
+
+      /*
+       * إعادة تحميل التطبيق بالكامل حتى تُقرأ
+       * آخر نسخة من قاعدة البيانات والواجهة.
+       *
+       * التوكن محفوظ في localStorage، لذلك سيعود
+       * المستخدم إلى التطبيق بعد إعادة التحميل.
+       */
+      setTimeout(() => {
+        window.location.reload();
+      }, 700);
 
     } catch (error) {
+
+      console.error(
+        "[UPDATE_DATABASE_ERROR]",
+        error
+      );
 
       adminStatus(
         "فشل تحديث قاعدة البيانات: " +
         error.message,
         "red"
       );
+
+      if (button) {
+        button.disabled = false;
+
+        button.innerHTML =
+          originalHtml ||
+          `<i class="fa-solid fa-database"></i>
+           تحديث قاعدة البيانات`;
+      }
     }
   }
 
