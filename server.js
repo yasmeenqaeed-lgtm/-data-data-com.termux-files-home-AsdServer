@@ -1322,7 +1322,9 @@ app.get(
                 "Secure Messenger V5.2",
 
             networkMode:
-                state?.network_mode || "local",
+                SERVER_MODE === "internet"
+                    ? "internet"
+                    : (state?.network_mode || "local"),
 
             networkName:
                 state?.network_name || "",
