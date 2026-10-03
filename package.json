@@ -1,0 +1,16 @@
+{
+  "name": "secure-messenger-v5-2",
+  "version": "5.2.0",
+  "description": "Secure Messenger V5.2 - Arabic RTL messaging server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.0.3",
+    "express": "^4.21.2",
+    "socket.io": "^4.8.4",
+    "sql.js": "^1.13.0"
+  }
+}
