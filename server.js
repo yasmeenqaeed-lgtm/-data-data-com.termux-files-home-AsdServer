@@ -218,11 +218,45 @@ io.use((socket, next) => {
             ""
         ).trim();
 
-        if (!authToken || !sessions.has(authToken)) {
+        if (!authToken) {
             return next(new Error("UNAUTHORIZED"));
         }
 
-        const session = sessions.get(authToken);
+        let session = sessions.get(authToken);
+
+        /*
+         * استرجاع الجلسة من قاعدة البيانات عند عدم وجودها
+         * في ذاكرة Node، خصوصًا بعد إعادة تشغيل Railway.
+         */
+        if (!session) {
+            const storedSession = one(
+                `SELECT
+                    token,
+                    user_id,
+                    device_serial,
+                    created_at,
+                    last_seen
+                 FROM sessions
+                 WHERE token=?
+                 LIMIT 1`,
+                [authToken]
+            );
+
+            if (!storedSession) {
+                return next(new Error("UNAUTHORIZED"));
+            }
+
+            session = {
+                user_id: Number(storedSession.user_id),
+                device_serial: String(
+                    storedSession.device_serial || ""
+                ),
+                created_at: storedSession.created_at,
+                last_seen: storedSession.last_seen
+            };
+
+            sessions.set(authToken, session);
+        }
 
         const user = one(
             "SELECT * FROM users WHERE id=?",
