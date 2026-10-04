@@ -280,6 +280,281 @@ io.on("connection", (socket) => {
     });
 
     /* =====================================================
+       المكالمات الصوتية الفردية Voice Call / WebRTC
+       مستقلة تماماً عن live_audio_*.
+    ===================================================== */
+
+    function getVoiceCallTargetUserId(payload) {
+        const value =
+            payload?.target_user_id ??
+            payload?.user_id ??
+            null;
+
+        const id = Number(value);
+
+        return Number.isInteger(id) && id > 0
+            ? id
+            : null;
+    }
+
+    function getUserByVoiceNumber(number) {
+        const normalized =
+            String(number || "").trim();
+
+        if (!/^\d{9}$/.test(normalized)) {
+            return null;
+        }
+
+        return one(
+            `
+            SELECT
+                id,
+                username,
+                name,
+                status,
+                voice_call_number
+            FROM users
+            WHERE voice_call_number=?
+            LIMIT 1
+            `,
+            [normalized]
+        );
+    }
+
+    socket.on("voice_call_request", payload => {
+        try {
+            const targetUserId =
+                getVoiceCallTargetUserId(payload);
+
+            let targetUser = null;
+
+            if (targetUserId) {
+                targetUser = one(
+                    `
+                    SELECT
+                        id,
+                        username,
+                        name,
+                        status,
+                        voice_call_number
+                    FROM users
+                    WHERE id=?
+                    LIMIT 1
+                    `,
+                    [targetUserId]
+                );
+            } else {
+                targetUser =
+                    getUserByVoiceNumber(
+                        payload?.voice_call_number
+                    );
+            }
+
+            if (!targetUser) {
+                socket.emit("voice_call_error", {
+                    message: "المستخدم المطلوب غير موجود"
+                });
+                return;
+            }
+
+            if (Number(targetUser.id) === userId) {
+                socket.emit("voice_call_error", {
+                    message: "لا يمكنك الاتصال بنفسك"
+                });
+                return;
+            }
+
+            if (String(targetUser.status || "") === "blocked" ||
+                String(targetUser.status || "") === "frozen") {
+                socket.emit("voice_call_error", {
+                    message: "المستخدم غير متاح للاتصال"
+                });
+                return;
+            }
+
+            const delivered =
+                emitToUser(
+                    targetUser.id,
+                    "voice_call_incoming",
+                    {
+                        ok: true,
+                        call_id: String(
+                            payload?.call_id || crypto.randomUUID()
+                        ),
+                        from_user_id: userId,
+                        from_name:
+                            String(socket.data.user?.name || ""),
+                        from_username:
+                            String(socket.data.user?.username || ""),
+                        from_voice_call_number:
+                            String(
+                                socket.data.user?.voice_call_number || ""
+                            ),
+                        target_user_id:
+                            Number(targetUser.id)
+                    }
+                );
+
+            if (!delivered) {
+                socket.emit("voice_call_unavailable", {
+                    message: "المستخدم غير متصل حاليًا",
+                    target_user_id:
+                        Number(targetUser.id)
+                });
+                return;
+            }
+
+            socket.emit("voice_call_ringing", {
+                ok: true,
+                call_id: String(
+                    payload?.call_id || ""
+                ),
+                target_user_id:
+                    Number(targetUser.id),
+                target_name:
+                    String(targetUser.name || ""),
+                target_voice_call_number:
+                    String(
+                        targetUser.voice_call_number || ""
+                    )
+            });
+
+        } catch (error) {
+            console.error(
+                "voice_call_request error:",
+                error.message
+            );
+
+            socket.emit("voice_call_error", {
+                message: "تعذر بدء الاتصال"
+            });
+        }
+    });
+
+    socket.on("voice_call_accept", payload => {
+        const fromUserId =
+            Number(payload?.from_user_id);
+
+        if (!Number.isInteger(fromUserId) || fromUserId <= 0) {
+            return;
+        }
+
+        emitToUser(
+            fromUserId,
+            "voice_call_accepted",
+            {
+                ok: true,
+                call_id:
+                    String(payload?.call_id || ""),
+                from_user_id: userId,
+                from_name:
+                    String(socket.data.user?.name || "")
+            }
+        );
+    });
+
+    socket.on("voice_call_reject", payload => {
+        const fromUserId =
+            Number(payload?.from_user_id);
+
+        if (!Number.isInteger(fromUserId) || fromUserId <= 0) {
+            return;
+        }
+
+        emitToUser(
+            fromUserId,
+            "voice_call_rejected",
+            {
+                ok: true,
+                call_id:
+                    String(payload?.call_id || ""),
+                from_user_id: userId,
+                reason:
+                    String(payload?.reason || "rejected")
+            }
+        );
+    });
+
+    socket.on("voice_call_offer", payload => {
+        const targetUserId =
+            getVoiceCallTargetUserId(payload);
+
+        if (!targetUserId) return;
+
+        emitToUser(
+            targetUserId,
+            "voice_call_offer",
+            {
+                ok: true,
+                call_id:
+                    String(payload?.call_id || ""),
+                from_user_id: userId,
+                from_name:
+                    String(socket.data.user?.name || ""),
+                offer: payload?.offer || null
+            }
+        );
+    });
+
+    socket.on("voice_call_answer", payload => {
+        const targetUserId =
+            getVoiceCallTargetUserId(payload);
+
+        if (!targetUserId) return;
+
+        emitToUser(
+            targetUserId,
+            "voice_call_answer",
+            {
+                ok: true,
+                call_id:
+                    String(payload?.call_id || ""),
+                from_user_id: userId,
+                answer: payload?.answer || null
+            }
+        );
+    });
+
+    socket.on("voice_call_ice", payload => {
+        const targetUserId =
+            getVoiceCallTargetUserId(payload);
+
+        if (!targetUserId) return;
+
+        emitToUser(
+            targetUserId,
+            "voice_call_ice",
+            {
+                ok: true,
+                call_id:
+                    String(payload?.call_id || ""),
+                from_user_id: userId,
+                candidate: payload?.candidate || null
+            }
+        );
+    });
+
+    socket.on("voice_call_end", payload => {
+        const targetUserId =
+            getVoiceCallTargetUserId(payload);
+
+        if (!targetUserId) return;
+
+        emitToUser(
+            targetUserId,
+            "voice_call_ended",
+            {
+                ok: true,
+                call_id:
+                    String(payload?.call_id || ""),
+                from_user_id: userId,
+                reason:
+                    String(payload?.reason || "ended")
+            }
+        );
+    });
+
+    /* =====================================================
        بدء البث الصوتي
     ===================================================== */
 
@@ -711,7 +986,8 @@ const ADMIN_PERMISSIONS = [
     "update_database",
     "alert_mode",
     "network_off",
-    "network_restart"
+    "network_restart",
+    "prevent_screenshot"
 ];
 
 function ensureUserPermissions(userId) {
@@ -733,22 +1009,60 @@ function ensureUserPermissions(userId) {
 
     for (const permission of ADMIN_PERMISSIONS) {
 
-        if (
-            !one(
-                `SELECT id
+        const existing =
+            one(
+                `SELECT id, permission, permission_key, allowed
                  FROM user_permissions
-                 WHERE user_id=? AND permission_key=?`,
-                [id, permission]
-            )
-        ) {
-
-            run(
-                `INSERT INTO user_permissions
-                 (user_id, permission, allowed, updated_at, permission_key, created_at)
-                 VALUES(?,?,1,?,?,?)`,
+                 WHERE user_id=?
+                   AND (
+                       permission=?
+                       OR permission_key=?
+                   )
+                 LIMIT 1`,
                 [
                     id,
                     permission,
+                    permission
+                ]
+            );
+
+        if (existing) {
+
+            /*
+             * لا نغيّر allowed هنا.
+             *
+             * القيمة التي حفظها مدير النظام يجب أن تبقى
+             * كما هي:
+             *
+             * 1 = True
+             * 0 = False
+             */
+            run(
+                `UPDATE user_permissions
+                 SET permission=?,
+                     permission_key=?
+                 WHERE id=?`,
+                [
+                    permission,
+                    permission,
+                    existing.id
+                ]
+            );
+
+        } else {
+
+            /*
+             * الصلاحية الجديدة فقط تحصل على القيمة الافتراضية.
+             * منع التقاط الشاشة يبدأ False.
+             */
+            run(
+                `INSERT INTO user_permissions
+                 (user_id, permission, allowed, updated_at, permission_key, created_at)
+                 VALUES(?,?,?,?,?,?)`,
+                [
+                    id,
+                    permission,
+                    permission === "prevent_screenshot" ? 0 : 1,
                     now(),
                     permission,
                     now()
@@ -780,6 +1094,171 @@ function ensureAllSupervisorPermissions() {
    نظام أرقام الاتصال الصوتي الداخلي
    مستقل عن voice_call_number و phone
 ========================================================= */
+
+/* =========================================================
+   رقم الاتصال الصوتي الرسمي
+   يتم تخصيصه فقط عند أول تسجيل دخول ناجح.
+   999111111 محجوز لمدير النظام.
+========================================================= */
+
+const OFFICIAL_VOICE_NUMBER_START = 999111111;
+const OFFICIAL_VOICE_NUMBER_END = 999999999;
+const OFFICIAL_VOICE_MANAGER_NUMBER = "999111111";
+
+function assignVoiceCallNumberOnSuccessfulLogin(userId) {
+
+    const id = Number(userId);
+
+    if (!Number.isInteger(id) || id <= 0) {
+        return "";
+    }
+
+    const user = one(
+        `SELECT id, role, voice_call_number
+         FROM users
+         WHERE id=?
+         LIMIT 1`,
+        [id]
+    );
+
+    if (!user) {
+        return "";
+    }
+
+    const existing =
+        String(user.voice_call_number || "").trim();
+
+    /*
+     * الرقم الموجود مسبقاً يبقى ثابتاً.
+     */
+    if (
+        /^\d{9}$/.test(existing) &&
+        Number(existing) >= OFFICIAL_VOICE_NUMBER_START &&
+        Number(existing) <= OFFICIAL_VOICE_NUMBER_END
+    ) {
+        return existing;
+    }
+
+    /*
+     * مدير النظام يحصل على الرقم المحجوز.
+     */
+    if (
+        String(user.role || "").trim() ===
+        "system_manager"
+    ) {
+        const managerNumber =
+            OFFICIAL_VOICE_MANAGER_NUMBER;
+
+        const occupied = one(
+            `SELECT id
+             FROM users
+             WHERE voice_call_number=?
+               AND id<>?
+             LIMIT 1`,
+            [managerNumber, id]
+        );
+
+        if (!occupied) {
+            run(
+                `UPDATE users
+                 SET voice_call_number=?,
+                     updated_at=?
+                 WHERE id=?`,
+                [
+                    managerNumber,
+                    now(),
+                    id
+                ]
+            );
+
+            return managerNumber;
+        }
+    }
+
+    /*
+     * أول رقم متاح بعد أعلى رقم محفوظ.
+     * 999111111 محجوز لمدير النظام.
+     */
+    const row = one(`
+        SELECT MAX(
+            CAST(voice_call_number AS INTEGER)
+        ) AS max_number
+        FROM users
+        WHERE voice_call_number IS NOT NULL
+          AND TRIM(voice_call_number) <> ''
+          AND CAST(voice_call_number AS INTEGER)
+              BETWEEN ? AND ?
+    `, [
+        OFFICIAL_VOICE_NUMBER_START,
+        OFFICIAL_VOICE_NUMBER_END
+    ]);
+
+    let nextNumber =
+        Number(row?.max_number || 0);
+
+    if (
+        nextNumber <
+        OFFICIAL_VOICE_NUMBER_START
+    ) {
+        nextNumber =
+            OFFICIAL_VOICE_NUMBER_START;
+    } else {
+        nextNumber++;
+    }
+
+    /*
+     * الرقم 999111111 محجوز لمدير النظام.
+     */
+    if (
+        nextNumber ===
+        OFFICIAL_VOICE_MANAGER_NUMBER
+    ) {
+        nextNumber++;
+    }
+
+    while (nextNumber <= OFFICIAL_VOICE_NUMBER_END) {
+
+        const occupied = one(
+            `SELECT id
+             FROM users
+             WHERE voice_call_number=?
+             LIMIT 1`,
+            [String(nextNumber)]
+        );
+
+        if (!occupied) {
+            break;
+        }
+
+        nextNumber++;
+    }
+
+    if (
+        nextNumber >
+        OFFICIAL_VOICE_NUMBER_END
+    ) {
+        throw new Error(
+            "لا توجد أرقام اتصال صوتي متاحة."
+        );
+    }
+
+    const assigned =
+        String(nextNumber);
+
+    run(
+        `UPDATE users
+         SET voice_call_number=?,
+             updated_at=?
+         WHERE id=?`,
+        [
+            assigned,
+            now(),
+            id
+        ]
+    );
+
+    return assigned;
+}
 
 function getNextInternalVoiceNumber() {
 
@@ -1059,89 +1538,18 @@ async function initDatabase() {
     );
 
     /*
-     * إصلاح/تعبئة الأرقام القديمة التي لا تملك رقم اتصال.
-     * الترتيب حسب id يضمن أرقامًا ثابتة ومتسلسلة.
-     */
-    const VOICE_CALL_START = 999111111;
-    const VOICE_CALL_END = 999999999;
-
-    const usersWithoutVoiceNumber = all(`
-        SELECT
-            id
-        FROM users
-        WHERE
-            voice_call_number IS NULL
-            OR TRIM(voice_call_number) = ''
-        ORDER BY id ASC
-    `);
-
-    let nextVoiceCallNumber = VOICE_CALL_START;
-
-    const existingVoiceNumbers = all(`
-        SELECT voice_call_number
-        FROM users
-        WHERE
-            voice_call_number IS NOT NULL
-            AND TRIM(voice_call_number) <> ''
-    `)
-        .map(row => Number(row.voice_call_number))
-        .filter(number =>
-            Number.isInteger(number) &&
-            number >= VOICE_CALL_START &&
-            number <= VOICE_CALL_END
-        );
-
-    if (existingVoiceNumbers.length) {
-        nextVoiceCallNumber =
-            Math.max(
-                VOICE_CALL_START - 1,
-                ...existingVoiceNumbers
-            ) + 1;
-    }
-
-    for (const user of usersWithoutVoiceNumber) {
-
-        while (
-            existingVoiceNumbers.includes(
-                nextVoiceCallNumber
-            )
-        ) {
-            nextVoiceCallNumber++;
-        }
-
-        if (nextVoiceCallNumber > VOICE_CALL_END) {
-            throw new Error(
-                "تم الوصول إلى الحد الأقصى لأرقام الاتصال الصوتي الداخلية."
-            );
-        }
-
-        run(
-            `UPDATE users
-             SET voice_call_number=?
-             WHERE id=?`,
-            [
-                String(nextVoiceCallNumber),
-                user.id
-            ]
-        );
-
-        existingVoiceNumbers.push(
-            nextVoiceCallNumber
-        );
-
-        nextVoiceCallNumber++;
-    }
-
-    /*
-     * فهرس فريد يمنع تكرار رقم الاتصال.
+     * أرقام الاتصال الصوتي لا يتم إنشاؤها أثناء تشغيل الخادم.
+     *
+     * يتم إنشاء voice_call_number فقط بعد أول تسجيل دخول
+     * ناجح للحساب، ثم يبقى ثابتاً في قاعدة البيانات.
      */
     run(`
         CREATE UNIQUE INDEX IF NOT EXISTS
         idx_users_voice_call_number
         ON users(voice_call_number)
+        WHERE voice_call_number IS NOT NULL
+          AND TRIM(voice_call_number) <> ''
     `);
-
-    saveDatabase();
 
     /* SESSIONS */
 
@@ -1645,7 +2053,10 @@ async function initDatabase() {
      * إنشاء وحفظ أرقام الاتصال الصوتي الداخلي
      * للحسابات الموجودة مسبقاً.
      */
-    assignMissingInternalVoiceNumbers();
+    /*
+     * لا يتم تخصيص أرقام الاتصال عند بدء الخادم.
+     * التخصيص يتم فقط بعد تسجيل دخول ناجح.
+     */
 
     initialized = true;
 
@@ -2559,9 +2970,24 @@ function hasAdminPermission(userId, permission) {
         one(
             `SELECT allowed
              FROM user_permissions
-             WHERE user_id=? AND permission_key=?`,
+             WHERE user_id=?
+               AND (
+                   permission_key=?
+                   OR permission=?
+               )
+             ORDER BY
+               CASE
+                   WHEN permission_key=? THEN 0
+                   WHEN permission=? THEN 1
+                   ELSE 2
+               END,
+               id
+             LIMIT 1`,
             [
                 user.id,
+                permission,
+                permission,
+                permission,
                 permission
             ]
         );
@@ -2826,6 +3252,33 @@ app.post(
             saveDatabase();
         }
 
+        /*
+         * تخصيص رقم الاتصال الرسمي فقط بعد نجاح
+         * اسم المستخدم وكلمة المرور والتحقق من حالة الحساب.
+         */
+        let voiceCallNumber = "";
+
+        try {
+            voiceCallNumber =
+                assignVoiceCallNumberOnSuccessfulLogin(
+                    user.id
+                );
+
+            saveDatabase();
+        } catch (error) {
+            console.error(
+                "VOICE NUMBER ASSIGNMENT ERROR:",
+                error.message
+            );
+
+            return res.status(500).json({
+                error:
+                    "VOICE_NUMBER_ASSIGNMENT_FAILED",
+                message:
+                    "تعذر تخصيص رقم الاتصال الصوتي."
+            });
+        }
+
         const token =
             randomToken();
 
@@ -2890,7 +3343,10 @@ app.post(
                     user.status,
 
                 device_serial:
-                    user.device_serial
+                    user.device_serial,
+
+                voice_call_number:
+                    voiceCallNumber
             }
         });
     }
@@ -3213,6 +3669,31 @@ app.post(
                 );
             }
 
+            /*
+             * Passkey يعتبر أيضاً تسجيل دخول ناجحاً.
+             * لذلك يحصل الحساب على رقمه عند أول دخول
+             * ناجح بالمفتاح، إن لم يكن لديه رقم سابق.
+             */
+            let voiceCallNumber = "";
+
+            try {
+                voiceCallNumber =
+                    assignVoiceCallNumberOnSuccessfulLogin(
+                        user.id
+                    );
+            } catch (error) {
+                console.error(
+                    "PASSKEY VOICE NUMBER ASSIGNMENT ERROR:",
+                    error.message
+                );
+
+                return res.status(500).json({
+                    ok: false,
+                    error:
+                        "VOICE_NUMBER_ASSIGNMENT_FAILED"
+                });
+            }
+
             const token =
                 createPasskeySession(
                     { id: user.id },
@@ -3243,7 +3724,9 @@ app.post(
                     role: user.role,
                     is_admin: user.is_admin,
                     status: user.status,
-                    device_serial: deviceSerial
+                    device_serial: deviceSerial,
+                    voice_call_number:
+                        voiceCallNumber
                 }
             });
         } catch (error) {
@@ -3875,79 +4358,11 @@ app.post(
         );
 
         /*
-         * تخصيص رقم الاتصال الصوتي الداخلي الجديد.
-         * مستقل تماماً عن voice_call_number القديم.
+         * لا يتم تخصيص رقم الاتصال عند إنشاء الحساب.
+         *
+         * سيتم تخصيص voice_call_number عند أول
+         * تسجيل دخول ناجح فقط.
          */
-        const internalCreatedUser =
-            one(
-                "SELECT id FROM users WHERE username=?",
-                [username]
-            );
-
-        if (!internalCreatedUser) {
-            return res.status(500).json({
-                ok: false,
-                message:
-                    "تم إنشاء المستخدم ولكن تعذر العثور على حسابه لتخصيص الرقم الداخلي."
-            });
-        }
-
-        assignInternalVoiceNumber(
-            Number(internalCreatedUser.id)
-        );
-
-        /*
-         * تخصيص رقم اتصال صوتي داخلي للمستخدم الجديد.
-         * الرقم التالي دائمًا بعد أعلى رقم مستخدم حالي.
-         */
-        const lastVoiceNumberRow = one(`
-            SELECT
-                MAX(CAST(voice_call_number AS INTEGER)) AS max_number
-            FROM users
-            WHERE
-                voice_call_number IS NOT NULL
-                AND TRIM(voice_call_number) <> ''
-        `);
-
-        const newVoiceCallNumber =
-            Math.max(
-                999111110,
-                Number(
-                    lastVoiceNumberRow?.max_number || 999111110
-                )
-            ) + 1;
-
-        if (newVoiceCallNumber > 999999999) {
-            return res.status(500).json({
-                ok: false,
-                message:
-                    "لا توجد أرقام اتصال صوتي داخلية متاحة."
-            });
-        }
-
-        const createdUser =
-            one(
-                "SELECT id FROM users WHERE username=?",
-                [username]
-            );
-
-        if (!createdUser) {
-            return res.status(500).json({
-                ok: false,
-                message:
-                    "تم إنشاء المستخدم ولكن تعذر تخصيص رقم الاتصال الصوتي."
-            });
-        }
-
-        run(
-            `UPDATE users
-             SET voice_call_number=?
-             WHERE id=?`,
-            [
-                String(newVoiceCallNumber),
-                createdUser.id
-            ]
-        );
 
         saveDatabase();
 
@@ -4265,19 +4680,9 @@ app.post(
         );
 
         /*
-         * تخصيص رقم الاتصال الصوتي الداخلي للمشرف الجديد.
+         * لا يتم تخصيص رقم الاتصال عند إنشاء المشرف.
+         * سيتم تخصيصه عند أول تسجيل دخول ناجح فقط.
          */
-        const internalCreatedSupervisor =
-            one(
-                "SELECT id FROM users WHERE username=?",
-                [username]
-            );
-
-        if (internalCreatedSupervisor) {
-            assignInternalVoiceNumber(
-                Number(internalCreatedSupervisor.id)
-            );
-        }
 
         saveDatabase();
 
@@ -4371,10 +4776,22 @@ app.get(
 
         const permissions =
             all(
-                `SELECT permission_key AS permission, allowed
+                `SELECT
+                     CASE
+                         WHEN permission_key IS NOT NULL
+                              AND permission_key <> ''
+                         THEN permission_key
+                         ELSE permission
+                     END AS permission,
+                     allowed
                  FROM user_permissions
                  WHERE user_id=?
-                 ORDER BY permission_key`,
+                   AND (
+                       (permission_key IS NOT NULL AND permission_key <> '')
+                       OR
+                       (permission IS NOT NULL AND permission <> '')
+                   )
+                 ORDER BY permission`,
                 [userId]
             );
 
@@ -4500,24 +4917,57 @@ app.put(
             const allowed =
                 item?.allowed ? 1 : 0;
 
-            run(
-                `INSERT INTO user_permissions
-                 (user_id, permission, allowed, updated_at, permission_key, created_at)
-                 VALUES(?,?,?, ?,?,?)
-                 ON CONFLICT(user_id, permission_key)
-                 DO UPDATE SET
-                    allowed=excluded.allowed,
-                    updated_at=excluded.updated_at,
-                    permission=excluded.permission`,
-                [
-                    userId,
-                    permission,
-                    allowed,
-                    now(),
-                    permission,
-                    now()
-                ]
-            );
+            const existingPermission =
+                one(
+                    `SELECT id
+                     FROM user_permissions
+                     WHERE user_id=?
+                       AND (
+                           permission_key=?
+                           OR permission=?
+                       )
+                     LIMIT 1`,
+                    [
+                        userId,
+                        permission,
+                        permission
+                    ]
+                );
+
+            if (existingPermission) {
+
+                run(
+                    `UPDATE user_permissions
+                     SET permission=?,
+                         permission_key=?,
+                         allowed=?,
+                         updated_at=?
+                     WHERE id=?`,
+                    [
+                        permission,
+                        permission,
+                        allowed,
+                        now(),
+                        existingPermission.id
+                    ]
+                );
+
+            } else {
+
+                run(
+                    `INSERT INTO user_permissions
+                     (user_id, permission, allowed, updated_at, permission_key, created_at)
+                     VALUES(?,?,?,?,?,?)`,
+                    [
+                        userId,
+                        permission,
+                        allowed,
+                        now(),
+                        permission,
+                        now()
+                    ]
+                );
+            }
         }
 
         ensureUserPermissions(userId);

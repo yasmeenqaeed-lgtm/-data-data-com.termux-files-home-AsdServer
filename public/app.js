@@ -36,6 +36,700 @@
 
   let messengerSocket = null;
 
+
+  /* =========================================================
+     ONE-TO-ONE VOICE CALL / WEBRTC
+     مستقل تماماً عن Live Audio Broadcast
+     ========================================================= */
+
+  let voiceCallPeer = null;
+  let voiceCallStream = null;
+  let voiceCallRemoteAudio = null;
+  let voiceCallTargetUserId = null;
+  let voiceCallTargetNumber = "";
+  let voiceCallDirection = "";
+  let voiceCallId = "";
+  let voiceCallIceQueue = [];
+
+  async function voiceCallFlushIceQueue() {
+    if (
+      !voiceCallPeer ||
+      !voiceCallPeer.remoteDescription ||
+      !voiceCallIceQueue.length
+    ) {
+      return;
+    }
+
+    const queued = voiceCallIceQueue.splice(
+      0,
+      voiceCallIceQueue.length
+    );
+
+    for (const candidate of queued) {
+      try {
+        await voiceCallPeer.addIceCandidate(
+          new RTCIceCandidate(candidate)
+        );
+      } catch (error) {
+        console.warn(
+          "[VOICE CALL] queued ICE error:",
+          error?.message || error
+        );
+      }
+    }
+  }
+
+  function voiceCallSetStatus(message) {
+    const el = document.getElementById("voiceCallStatus");
+    if (el) el.textContent = String(message || "");
+  }
+
+  function voiceCallSetButtons(active) {
+    const start = document.getElementById("voiceCallStartBtn");
+    const end = document.getElementById("voiceCallEndBtn");
+
+    if (start) start.disabled = !!active;
+    if (end) end.disabled = !active;
+  }
+
+  function voiceCallCleanupPeer() {
+    try {
+      if (voiceCallPeer) {
+        voiceCallPeer.onicecandidate = null;
+        voiceCallPeer.ontrack = null;
+        voiceCallPeer.onconnectionstatechange = null;
+        voiceCallPeer.close();
+      }
+    } catch (_) {}
+
+    voiceCallPeer = null;
+  }
+
+  function voiceCallCleanupMedia() {
+    try {
+      if (voiceCallStream) {
+        voiceCallStream.getTracks().forEach(track => {
+          try { track.stop(); } catch (_) {}
+        });
+      }
+    } catch (_) {}
+
+    voiceCallStream = null;
+
+    if (voiceCallRemoteAudio) {
+      try {
+        voiceCallRemoteAudio.pause();
+        voiceCallRemoteAudio.srcObject = null;
+        voiceCallRemoteAudio.remove();
+      } catch (_) {}
+    }
+
+    voiceCallRemoteAudio = null;
+  }
+
+  function voiceCallResetState() {
+    voiceCallCleanupPeer();
+    voiceCallCleanupMedia();
+
+    voiceCallTargetUserId = null;
+    voiceCallTargetNumber = "";
+    voiceCallDirection = "";
+    voiceCallId = "";
+    voiceCallIceQueue = [];
+
+    try {
+      if (typeof callActive !== "undefined") {
+        callActive = false;
+      }
+    } catch (_) {}
+
+    voiceCallSetButtons(false);
+  }
+
+  function voiceCallEnd(sendSignal = true) {
+    if (
+      sendSignal &&
+      messengerSocket &&
+      messengerSocket.connected &&
+      voiceCallTargetUserId
+    ) {
+      try {
+        messengerSocket.emit("voice_call_end", {
+          target_user_id: voiceCallTargetUserId,
+          voice_call_number: voiceCallTargetNumber,
+          call_id: voiceCallId,
+          reason: "ended"
+        });
+      } catch (error) {
+        console.warn(
+          "[VOICE CALL] end signal:",
+          error.message
+        );
+      }
+    }
+
+    voiceCallResetState();
+  }
+
+  async function voiceCallGetMicrophone() {
+    if (
+      !navigator.mediaDevices ||
+      typeof navigator.mediaDevices.getUserMedia !== "function"
+    ) {
+      throw new Error("المتصفح لا يدعم الميكروفون");
+    }
+
+    if (!voiceCallStream) {
+      voiceCallStream =
+        await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          },
+          video: false
+        });
+    }
+
+    return voiceCallStream;
+  }
+
+  function voiceCallCreatePeer() {
+    voiceCallCleanupPeer();
+
+    voiceCallPeer =
+      new RTCPeerConnection({
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" }
+        ]
+      });
+
+    if (voiceCallStream) {
+      voiceCallStream.getTracks().forEach(track => {
+        voiceCallPeer.addTrack(
+          track,
+          voiceCallStream
+        );
+      });
+    }
+
+    voiceCallPeer.onicecandidate = event => {
+      if (
+        !event.candidate ||
+        !messengerSocket ||
+        !messengerSocket.connected ||
+        !voiceCallTargetUserId
+      ) {
+        return;
+      }
+
+      messengerSocket.emit(
+        "voice_call_ice",
+        {
+          target_user_id:
+            voiceCallTargetUserId,
+          call_id:
+            voiceCallId,
+          candidate:
+            event.candidate
+        }
+      );
+    };
+
+    voiceCallPeer.ontrack = event => {
+      try {
+        if (!voiceCallRemoteAudio) {
+          voiceCallRemoteAudio =
+            document.createElement("audio");
+
+          voiceCallRemoteAudio.autoplay = true;
+          voiceCallRemoteAudio.playsInline = true;
+          voiceCallRemoteAudio.style.display = "none";
+
+          document.body.appendChild(
+            voiceCallRemoteAudio
+          );
+        }
+
+        const remoteStream =
+          event.streams &&
+          event.streams[0]
+            ? event.streams[0]
+            : null;
+
+        if (remoteStream) {
+          voiceCallRemoteAudio.srcObject =
+            remoteStream;
+
+          const result =
+            voiceCallRemoteAudio.play();
+
+          if (
+            result &&
+            typeof result.catch === "function"
+          ) {
+            result.catch(error => {
+              console.warn(
+                "[VOICE CALL] audio play:",
+                error.message
+              );
+            });
+          }
+        }
+      } catch (error) {
+        console.warn(
+          "[VOICE CALL] remote track:",
+          error.message
+        );
+      }
+    };
+
+    voiceCallPeer.onconnectionstatechange =
+      () => {
+        if (!voiceCallPeer) return;
+
+        const state =
+          voiceCallPeer.connectionState;
+
+        if (state === "connected") {
+          voiceCallSetStatus(
+            "تم الاتصال الصوتي"
+          );
+        } else if (state === "connecting") {
+          voiceCallSetStatus(
+            "جاري إنشاء الاتصال الصوتي..."
+          );
+        } else if (
+          state === "failed" ||
+          state === "disconnected"
+        ) {
+          voiceCallSetStatus(
+            "انقطع الاتصال الصوتي"
+          );
+        }
+      };
+
+    return voiceCallPeer;
+  }
+
+  function setupVoiceCallSocketHandlers(socket) {
+    if (
+      !socket ||
+      socket.__voiceCallHandlersInstalled
+    ) {
+      return;
+    }
+
+    socket.__voiceCallHandlersInstalled =
+      true;
+
+    socket.on(
+      "voice_call_ringing",
+      data => {
+        console.log(
+          "[VOICE CALL] ringing",
+          data
+        );
+
+        voiceCallSetStatus(
+          "جاري انتظار رد المستخدم..."
+        );
+      }
+    );
+
+    socket.on(
+      "voice_call_unavailable",
+      data => {
+        voiceCallSetStatus(
+          data?.message ||
+          "المستخدم غير متاح حالياً"
+        );
+
+        voiceCallResetState();
+      }
+    );
+
+    socket.on(
+      "voice_call_incoming",
+      async data => {
+        if (!data) return;
+
+        console.log(
+          "[VOICE CALL] incoming",
+          data
+        );
+
+        const callerId =
+          data.from_user_id ?? null;
+
+        const callerName =
+          data.from_name ||
+          data.from_username ||
+          "مستخدم";
+
+        const callerNumber =
+          data.from_voice_call_number ||
+          "";
+
+        voiceCallId =
+          String(data.call_id || "");
+
+        if (!callerId) {
+          console.warn(
+            "[VOICE CALL] missing caller id"
+          );
+          return;
+        }
+
+        if (voiceCallTargetUserId) {
+          socket.emit(
+            "voice_call_reject",
+            {
+              from_user_id: callerId,
+              call_id: voiceCallId,
+              reason: "busy"
+            }
+          );
+          return;
+        }
+
+        const answer =
+          window.confirm(
+            "مكالمة صوتية واردة من " +
+            callerName +
+            "\n\nهل تريد الرد؟"
+          );
+
+        if (!answer) {
+          socket.emit(
+            "voice_call_reject",
+            {
+              from_user_id: callerId,
+              voice_call_number:
+                callerNumber,
+              call_id: voiceCallId,
+              reason: "rejected"
+            }
+          );
+          return;
+        }
+
+        try {
+          voiceCallTargetUserId =
+            callerId;
+
+          voiceCallTargetNumber =
+            String(callerNumber || "");
+
+          voiceCallDirection =
+            "incoming";
+
+          try {
+            if (typeof callActive !== "undefined") {
+              callActive = true;
+            }
+          } catch (_) {}
+
+          voiceCallSetButtons(true);
+
+          voiceCallSetStatus(
+            "جاري الرد على " +
+            callerName +
+            "..."
+          );
+
+          await voiceCallGetMicrophone();
+
+          socket.emit(
+            "voice_call_accept",
+            {
+              from_user_id:
+                callerId,
+              voice_call_number:
+                callerNumber,
+              call_id:
+                voiceCallId
+            }
+          );
+
+        } catch (error) {
+          console.error(
+            "[VOICE CALL] microphone:",
+            error
+          );
+
+          socket.emit(
+            "voice_call_reject",
+            {
+              from_user_id:
+                callerId,
+              voice_call_number:
+                callerNumber,
+              call_id:
+                voiceCallId,
+              reason:
+                "microphone_error"
+            }
+          );
+
+          voiceCallResetState();
+
+          voiceCallSetStatus(
+            "تعذر تشغيل الميكروفون"
+          );
+        }
+      }
+    );
+
+    socket.on(
+      "voice_call_accepted",
+      async data => {
+        if (
+          voiceCallDirection !==
+          "outgoing"
+        ) {
+          return;
+        }
+
+        try {
+          if (
+            data?.from_user_id &&
+            !voiceCallTargetUserId
+          ) {
+            voiceCallTargetUserId =
+              Number(data.from_user_id);
+          }
+
+          if (data?.call_id) {
+            voiceCallId =
+              String(data.call_id);
+          }
+
+          await voiceCallGetMicrophone();
+
+          const peer =
+            voiceCallCreatePeer();
+
+          const offer =
+            await peer.createOffer({
+              offerToReceiveAudio: true
+            });
+
+          await peer.setLocalDescription(
+            offer
+          );
+
+          socket.emit(
+            "voice_call_offer",
+            {
+              target_user_id:
+                voiceCallTargetUserId,
+              call_id:
+                voiceCallId,
+              offer:
+                peer.localDescription
+            }
+          );
+
+          voiceCallSetStatus(
+            "جاري بدء الاتصال الصوتي..."
+          );
+
+        } catch (error) {
+          console.error(
+            "[VOICE CALL] offer:",
+            error
+          );
+
+          voiceCallEnd(false);
+
+          voiceCallSetStatus(
+            "تعذر إنشاء الاتصال الصوتي"
+          );
+        }
+      }
+    );
+
+    socket.on(
+      "voice_call_error",
+      data => {
+        console.warn(
+          "[VOICE CALL] server error:",
+          data
+        );
+
+        voiceCallSetStatus(
+          data?.message ||
+          "تعذر بدء الاتصال الصوتي"
+        );
+
+        callActive = false;
+        voiceCallResetState();
+
+        try {
+          if (
+            typeof updateButtons === "function"
+          ) {
+            updateButtons();
+          }
+        } catch (_) {}
+      }
+    );
+
+    socket.on(
+      "voice_call_rejected",
+      data => {
+        voiceCallSetStatus(
+          data?.message ||
+          "تم رفض المكالمة"
+        );
+
+        voiceCallResetState();
+      }
+    );
+
+    socket.on(
+      "voice_call_offer",
+      async data => {
+        if (
+          !data ||
+          !data.offer
+        ) {
+          return;
+        }
+
+        try {
+          await voiceCallGetMicrophone();
+
+          const peer =
+            voiceCallCreatePeer();
+
+          await peer.setRemoteDescription(
+            new RTCSessionDescription(
+              data.offer
+            )
+          );
+
+          await voiceCallFlushIceQueue();
+
+          const answer =
+            await peer.createAnswer({
+              offerToReceiveAudio: true
+            });
+
+          await peer.setLocalDescription(
+            answer
+          );
+
+          socket.emit(
+            "voice_call_answer",
+            {
+              target_user_id:
+                voiceCallTargetUserId,
+              call_id:
+                voiceCallId,
+              answer:
+                peer.localDescription
+            }
+          );
+
+          voiceCallSetStatus(
+            "تم الرد، جاري الاتصال..."
+          );
+
+        } catch (error) {
+          console.error(
+            "[VOICE CALL] offer handling:",
+            error
+          );
+
+          voiceCallSetStatus(
+            "تعذر استقبال الاتصال الصوتي"
+          );
+        }
+      }
+    );
+
+    socket.on(
+      "voice_call_answer",
+      async data => {
+        if (
+          !voiceCallPeer ||
+          !data?.answer
+        ) {
+          return;
+        }
+
+        try {
+          await voiceCallPeer.setRemoteDescription(
+            new RTCSessionDescription(
+              data.answer
+            )
+          );
+
+          await voiceCallFlushIceQueue();
+
+          voiceCallSetStatus(
+            "جاري إكمال الاتصال الصوتي..."
+          );
+
+        } catch (error) {
+          console.error(
+            "[VOICE CALL] answer:",
+            error
+          );
+        }
+      }
+    );
+
+    socket.on(
+      "voice_call_ice",
+      async data => {
+        if (
+          !data?.candidate
+        ) {
+          return;
+        }
+
+        if (
+          !voiceCallPeer ||
+          !voiceCallPeer.remoteDescription
+        ) {
+          voiceCallIceQueue.push(
+            data.candidate
+          );
+
+          return;
+        }
+
+        try {
+          await voiceCallPeer.addIceCandidate(
+            new RTCIceCandidate(
+              data.candidate
+            )
+          );
+        } catch (error) {
+          console.warn(
+            "[VOICE CALL] ICE error:",
+            error?.message || error
+          );
+        }
+      }
+    );
+
+    socket.on(
+      "voice_call_ended",
+      () => {
+        voiceCallResetState();
+
+        voiceCallSetStatus(
+          "أنهى الطرف الآخر الاتصال"
+        );
+      }
+    );
+  }
+
   function connectMessengerSocket() {
     if (
       typeof io !== "function" ||
@@ -63,6 +757,10 @@
       });
 
       setupLiveAudioSocketHandlers(
+        messengerSocket
+      );
+
+      setupVoiceCallSocketHandlers(
         messengerSocket
       );
 
@@ -13455,9 +14153,10 @@ if (
                 ? manualInput.value.trim()
                 : selectedNumber;
 
-            if (!/^\\d{9}$/.test(number)) {
+            if (!/^\d{9}$/.test(number)) {
                 if (status) {
-                    status.textContent = "أدخل رقم اتصال مكونًا من 9 أرقام";
+                    status.textContent =
+                        "أدخل رقم اتصال مكونًا من 9 أرقام";
                 }
                 return;
             }
@@ -13468,36 +14167,141 @@ if (
 
             if (!user) {
                 if (status) {
-                    status.textContent = "رقم الاتصال غير موجود";
+                    status.textContent =
+                        "رقم الاتصال غير موجود";
                 }
                 return;
             }
 
             if (!user.online) {
                 if (status) {
-                    status.textContent = "المستخدم غير متصل حاليًا";
+                    status.textContent =
+                        "المستخدم غير متصل حاليًا";
                 }
+                return;
+            }
+
+            if (
+                typeof messengerSocket === "undefined" ||
+                !messengerSocket ||
+                !messengerSocket.connected
+            ) {
+                if (status) {
+                    status.textContent =
+                        "الاتصال بالخادم غير متاح حاليًا";
+                }
+                return;
+            }
+
+            const targetUserId =
+                user.id ??
+                user.user_id ??
+                user.userId ??
+                user.uid ??
+                null;
+
+            if (!targetUserId) {
+                if (status) {
+                    status.textContent =
+                        "تعذر تحديد المستخدم المطلوب";
+                }
+                console.error(
+                    "[VOICE CALL] missing target user id",
+                    user
+                );
                 return;
             }
 
             selectedNumber = number;
             callActive = true;
 
+            voiceCallTargetUserId = Number(targetUserId);
+            voiceCallTargetNumber = number;
+            voiceCallDirection = "outgoing";
+
+            try {
+                voiceCallId =
+                    typeof crypto !== "undefined" &&
+                    typeof crypto.randomUUID === "function"
+                        ? crypto.randomUUID()
+                        : "voice-" +
+                          Date.now() +
+                          "-" +
+                          Math.random()
+                              .toString(36)
+                              .slice(2);
+            } catch (_) {
+                voiceCallId =
+                    "voice-" +
+                    Date.now() +
+                    "-" +
+                    Math.random()
+                        .toString(36)
+                        .slice(2);
+            }
+
             if (status) {
-                status.textContent = "جاري الاتصال بـ " + user.name;
+                status.textContent =
+                    "جاري الاتصال بـ " +
+                    (user.name || number) +
+                    "...";
             }
 
             updateButtons();
+
+            messengerSocket.emit(
+                "voice_call_request",
+                {
+                    target_user_id:
+                        voiceCallTargetUserId,
+                    voice_call_number:
+                        voiceCallTargetNumber,
+                    call_id:
+                        voiceCallId
+                }
+            );
         }
 
         function endCall() {
-            callActive = false;
+            try {
+                if (
+                    typeof voiceCallEnd === "function"
+                ) {
+                    voiceCallEnd(true);
 
-            if (status) {
-                status.textContent = "تم إنهاء الاتصال";
+                    callActive = false;
+
+                    if (status) {
+                        status.textContent =
+                            "تم إنهاء الاتصال";
+                    }
+
+                    updateButtons();
+                } else {
+                    callActive = false;
+
+                    if (status) {
+                        status.textContent =
+                            "تم إنهاء الاتصال";
+                    }
+
+                    updateButtons();
+                }
+            } catch (error) {
+                console.warn(
+                    "[VOICE CALL] endCall:",
+                    error?.message || error
+                );
+
+                callActive = false;
+
+                if (status) {
+                    status.textContent =
+                        "تم إنهاء الاتصال";
+                }
+
+                updateButtons();
             }
-
-            updateButtons();
         }
 
         openBtn.addEventListener("click", function (event) {
