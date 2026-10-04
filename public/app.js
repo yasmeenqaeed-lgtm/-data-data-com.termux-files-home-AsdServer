@@ -14108,7 +14108,7 @@ if (
                 return;
             }
 
-            if (!/^\\d{9}$/.test(number)) {
+            if (!/^\d{9}$/.test(number)) {
                 numberStatus.textContent = "يجب إدخال رقم مكون من 9 أرقام";
                 numberStatus.style.color = "#e93345";
                 return;
@@ -14139,7 +14139,7 @@ if (
                 ? manualInput.value.trim()
                 : selectedNumber;
 
-            const valid = /^\\d{9}$/.test(number);
+            const valid = /^\d{9}$/.test(number);
 
             startBtn.disabled = !valid || callActive;
 
